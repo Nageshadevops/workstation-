@@ -27,3 +27,18 @@ variable "vpc_cidr" {
   description = "CIDR block for the Slurm VPC. Must not overlap workstation-vpc (172.22.0.0/16)."
   type        = string
 }
+
+variable "availability_zone" {
+  description = "Availability zone for both subnets."
+  type        = string
+}
+
+variable "public_subnet_cidr" {
+  description = "CIDR block for the public subnet (NAT gateway only)."
+  type        = string
+}
+
+variable "private_subnet_cidr" {
+  description = "CIDR block for the private subnet (Slurm servers)."
+  type        = string
+}
