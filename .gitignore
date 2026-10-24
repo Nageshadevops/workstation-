@@ -1,0 +1,15 @@
+# Terraform: provider downloads, state and saved plans stay on the workstation only.
+# .terraform.lock.hcl is NOT ignored: it pins provider versions and belongs in git.
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+*.tfplan
+crash.log
+crash.*.log
+
+# SSH private keys
+*.pem
+
+# Ansible: munge key (secret) and Slurm build archive
+slurm/ansible/files/
