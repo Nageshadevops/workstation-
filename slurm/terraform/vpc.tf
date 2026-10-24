@@ -41,3 +41,40 @@ resource "aws_subnet" "private" {
     Tier = "private"
   }
 }
+
+# ---------------------------------------------------------------------------
+# Step 1.3: internet gateway + public route table
+# Console: VPC > Internet gateways, VPC > Route tables
+# ---------------------------------------------------------------------------
+
+# The VPC's door to the internet. One per VPC; free.
+resource "aws_internet_gateway" "this" {
+  vpc_id = aws_vpc.this.id
+
+  tags = {
+    Name = "${local.name_prefix}-igw"
+  }
+}
+
+# Route table for the public subnet. AWS adds the "172.21.0.0/16 -> local" route itself.
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.this.id
+
+  tags = {
+    Name = "${local.name_prefix}-public-rt"
+  }
+}
+
+# "Everything that is not inside the VPC goes to the internet gateway."
+# This route is what makes the subnet public.
+resource "aws_route" "public_internet" {
+  route_table_id         = aws_route_table.public.id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.this.id
+}
+
+# Use the public route table for the public subnet (instead of the VPC's main route table).
+resource "aws_route_table_association" "public" {
+  subnet_id      = aws_subnet.public.id
+  route_table_id = aws_route_table.public.id
+}

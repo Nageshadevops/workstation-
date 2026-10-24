@@ -141,3 +141,74 @@ the code with its state and only the 2 subnets are new.
 | VPC > Your VPCs > slurm-dev-vpc > Resource map | Subnets (2) |
 
 **Cost:** subnets are free.
+
+**Result (2026-10-24):** `Plan: 2 to add`; public subnet `subnet-084e577541c2491a1`,
+private subnet `subnet-09d4701625a662acb`.
+
+### Questions answered
+
+- **`vpc_id = aws_vpc.this.id`**: a reference, `<type>.<name>.<attribute>`. It means
+  "the ID of the VPC resource called `this` in this code". Terraform uses references to work
+  out the order (VPC before subnets on apply, the reverse on destroy), and the subnet always
+  gets the right ID, even after the VPC is recreated with a new one.
+- **`map_public_ip_on_launch = false`**: servers launched in this subnet do not get a public
+  IP automatically (the workstation's subnet has it on, which is why the workstation got one).
+- **Why a public subnet?** Only for the NAT gateway (step 1.4). The NAT gateway must be able
+  to reach the internet gateway, and a subnet with a route to the internet gateway is a
+  public subnet. No servers go there.
+- **Why an Elastic IP?** Slurm does not need one; it only uses private IPs. A public NAT
+  gateway needs a fixed public address to send the servers' outgoing traffic from, and AWS
+  requires an Elastic IP for it.
+
+---
+
+## Step 1.3: Internet gateway + public route table
+
+A **route table** is a list of rules: "traffic for this destination goes there".
+Every subnet uses exactly one route table. A subnet is **public** when its route table sends
+`0.0.0.0/0` (everything) to an **internet gateway**.
+
+**Code:** four new resources in `vpc.tf`:
+
+| Resource | Console name | What |
+|---|---|---|
+| `aws_internet_gateway.this` | `slurm-dev-igw` | the VPC's connection to the internet, attached to slurm-dev-vpc |
+| `aws_route_table.public` | `slurm-dev-public-rt` | new route table for the public subnet |
+| `aws_route.public_internet` | route in that table | `0.0.0.0/0 → slurm-dev-igw` |
+| `aws_route_table_association.public` | Subnet associations tab | links the public subnet to `slurm-dev-public-rt` |
+
+Routes in `slurm-dev-public-rt` after apply:
+
+| Destination | Target | Meaning |
+|---|---|---|
+| 172.21.0.0/16 | local | traffic inside the VPC stays inside (added by AWS, cannot be removed) |
+| 0.0.0.0/0 | igw-... | everything else goes to the internet |
+
+The most specific route wins: 172.21.10.5 matches `/16` (local) better than `/0`.
+
+The private subnet still uses the VPC's **main** route table (only `local`), so it has no
+internet yet. That comes with the NAT gateway in step 1.4.
+
+An internet gateway alone does not make servers reachable: a server also needs a public IP
+and a security group that allows the traffic. Our Slurm servers will have neither.
+
+**Run on the workstation:**
+
+```bash
+cd ~/workstation- && git pull && cd slurm
+make plan     # expect: Plan: 4 to add, 0 to change, 0 to destroy.
+make apply
+make output   # internet_gateway_id and public_route_table_id added
+```
+
+**Check in the console:**
+
+| Console page | What you should see |
+|---|---|
+| VPC > Internet gateways | `slurm-dev-igw`, State **Attached**, VPC slurm-dev-vpc |
+| VPC > Route tables > `slurm-dev-public-rt` > Routes | `172.21.0.0/16 local` and `0.0.0.0/0 igw-...` |
+| same > Subnet associations | `slurm-dev-public-ap-south-2a` |
+| VPC > Subnets > private subnet > Route table | still the main route table, only `local` |
+| Your VPCs > slurm-dev-vpc > Resource map | Route tables (2), Network connections: the IGW |
+
+**Cost:** internet gateways are free.
