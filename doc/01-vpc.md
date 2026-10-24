@@ -212,3 +212,77 @@ make output   # internet_gateway_id and public_route_table_id added
 | Your VPCs > slurm-dev-vpc > Resource map | Route tables (2), Network connections: the IGW |
 
 **Cost:** internet gateways are free.
+
+**Result (2026-10-24):** `Plan: 4 to add`; internet gateway `igw-02329a8b026cd6d65`,
+public route table `rtb-025e7406cb23f8f59` (association `rtbassoc-0f442360012fe6f17`).
+
+---
+
+## Step 1.4: NAT gateway + private route table
+
+The Slurm servers will have only private IPs, but they must download packages (dnf, pip,
+the Slurm source). A **NAT gateway** (Network Address Translation) forwards their outgoing
+traffic to the internet using its own public IP and passes the replies back, like a home
+Wi-Fi router. Nobody on the internet can start a connection to the servers.
+
+```
+slurm-node-1 172.21.10.x (private subnet)
+   | private route table: 0.0.0.0/0 -> NAT gateway
+   v
+NAT gateway + Elastic IP (public subnet)
+   | public route table: 0.0.0.0/0 -> internet gateway
+   v
+internet gateway -> internet (Red Hat repos, pypi, schedmd.com)
+```
+
+An **Elastic IP** is a public IPv4 address reserved in the account; it stays the same until it
+is released (the workstation's 40.192.85.194 is one). A public NAT gateway requires one.
+Slurm itself does not use it.
+
+**Code:** five new resources in `vpc.tf`:
+
+| Resource | Console name | What |
+|---|---|---|
+| `aws_eip.nat` | `slurm-dev-nat-eip` | Elastic IP for the NAT gateway |
+| `aws_nat_gateway.this` | `slurm-dev-nat` | NAT gateway in the **public** subnet |
+| `aws_route_table.private` | `slurm-dev-private-rt` | new route table for the private subnet |
+| `aws_route.private_nat` | route in that table | `0.0.0.0/0 → slurm-dev-nat` |
+| `aws_route_table_association.private` | Subnet associations tab | links the private subnet to `slurm-dev-private-rt` |
+
+`depends_on = [aws_internet_gateway.this]` on the Elastic IP and NAT gateway: Terraform orders
+resources by references, but nothing in their code refers to the internet gateway. Without
+it, Terraform could create (or on destroy, keep) them in the wrong order.
+
+Routes after apply:
+
+| Route table | Subnet | 172.21.0.0/16 | 0.0.0.0/0 |
+|---|---|---|---|
+| slurm-dev-public-rt | public | local | internet gateway |
+| slurm-dev-private-rt | private | local | NAT gateway |
+| main (unnamed) | none | local | none |
+
+**Run on the workstation:**
+
+```bash
+cd ~/workstation- && git pull && cd slurm
+make plan     # expect: Plan: 5 to add, 0 to change, 0 to destroy.
+make apply    # the NAT gateway takes 1-2 minutes ("Still creating...")
+make output   # nat_gateway_id, nat_public_ip, private_route_table_id added
+```
+
+**Check in the console:**
+
+| Console page | What you should see |
+|---|---|
+| VPC > Elastic IPs | `slurm-dev-nat-eip`, associated with the NAT gateway's network interface |
+| VPC > NAT gateways | `slurm-dev-nat`, State **Available**, Connectivity type Public, subnet `slurm-dev-public-ap-south-2a`, same Elastic IP |
+| VPC > Route tables > `slurm-dev-private-rt` > Routes | `172.21.0.0/16 local` and `0.0.0.0/0 nat-...` |
+| same > Subnet associations | `slurm-dev-private-ap-south-2a` |
+| Your VPCs > slurm-dev-vpc > Resource map | Route tables (3), Network connections: IGW and NAT |
+
+The internet access itself is tested in stage 2, when there is a server in the private subnet
+(`curl -s https://checkip.amazonaws.com` on it must print the NAT Elastic IP).
+
+**Cost:** this step starts charges: NAT gateway ~$0.06/hour (~$45/month) plus ~$0.06/GB of
+data, Elastic IP ~$0.005/hour. `make destroy` stops them. If you pause for several days
+before stage 2, consider `make destroy` and `make apply` again later.
