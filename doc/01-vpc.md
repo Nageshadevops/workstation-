@@ -286,3 +286,93 @@ The internet access itself is tested in stage 2, when there is a server in the p
 **Cost:** this step starts charges: NAT gateway ~$0.06/hour (~$45/month) plus ~$0.06/GB of
 data, Elastic IP ~$0.005/hour. `make destroy` stops them. If you pause for several days
 before stage 2, consider `make destroy` and `make apply` again later.
+
+**2026-10-24:** the whole stack was removed overnight with `make destroy` to save the NAT
+cost, and re-created on 2026-10-25 with `make apply`. All IDs change after a re-create;
+`make output` shows the current ones.
+
+---
+
+## Step 1.5: VPC peering to workstation-vpc
+
+Two VPCs are separate networks: by default the workstation (172.22.7.210) cannot reach
+anything in 172.21.0.0/16. A **VPC peering connection** joins them so they talk by private
+IP, without going through the internet.
+
+```
+workstation-vpc 172.22.0.0/16                        slurm-dev-vpc 172.21.0.0/16
+  workstation 172.22.7.210                             private subnet 172.21.10.0/24
+  route table (existing):                              slurm-dev-private-rt:
+    172.21.0.0/16 -> pcx-...  (added) <== peering ==>    172.22.0.0/16 -> pcx-...
+```
+
+Peering needs:
+
+1. CIDRs that **do not overlap** (172.21 vs 172.22: OK).
+2. The connection **requested and accepted**. Same account and region, so `auto_accept = true`
+   does both.
+3. A **route on both sides**. Without the return route, packets go out and the replies are lost.
+4. Security groups that allow the traffic (stage 2: the Slurm servers will allow SSH from
+   the workstation).
+
+Peering is not transitive: the workstation can reach slurm-dev-vpc, but cannot use its NAT
+gateway, and slurm-dev-vpc cannot use the workstation's internet gateway.
+
+**New idea: `data` sources.** A `resource` is something Terraform creates and owns. A `data`
+source only **reads** something that already exists. Terraform never changes or deletes it.
+The workstation VPC was made by hand, so Terraform reads it:
+
+| Block | What it reads |
+|---|---|
+| `data.aws_vpc.workstation` | workstation-vpc by ID → its CIDR 172.22.0.0/16 |
+| `data.aws_route_table.workstation` | the route table used by `subnet-0c71b9f5fd4fb972f` |
+
+**Code:** new file `peering.tf`, two new variables (`workstation_vpc_id`,
+`workstation_subnet_id`):
+
+| Resource | Console | What |
+|---|---|---|
+| `aws_vpc_peering_connection.workstation` | Peering connections > `slurm-dev-to-workstation` | requester slurm-dev-vpc, accepter workstation-vpc |
+| `aws_route.private_to_workstation` | `slurm-dev-private-rt` > Routes | `172.22.0.0/16 → pcx-...` |
+| `aws_route.workstation_to_slurm` | **workstation** route table > Routes | `172.21.0.0/16 → pcx-...` |
+
+The only change in workstation-vpc is that one route. `make destroy` removes that route and
+the peering, nothing else in workstation-vpc.
+
+The public subnet gets no route to the workstation: only the NAT gateway lives there.
+
+**Run on the workstation:**
+
+```bash
+cd ~/workstation- && git pull && cd slurm
+make plan     # if the stack still exists: Plan: 3 to add, 0 to change, 0 to destroy.
+              # after last night's destroy:  Plan: 15 to add (12 from steps 1.1-1.4 + 3)
+make apply
+make output   # peering_connection_id, workstation_route_table_id added
+```
+
+In the plan, check that the route `aws_route.workstation_to_slurm` uses the workstation's
+route table ID, and that nothing is planned to **change** or **destroy**.
+
+If the plan fails with `no matching Route Table found`, the workstation subnet has no
+explicit route table association (it uses its VPC's main route table). Then tell me and
+we look it up differently.
+
+**Check in the console:**
+
+| Console page | What you should see |
+|---|---|
+| VPC > Peering connections | `slurm-dev-to-workstation`, Status **Active**, requester CIDR 172.21.0.0/16, accepter CIDR 172.22.0.0/16 |
+| VPC > Route tables > `slurm-dev-private-rt` > Routes | local, `0.0.0.0/0 → nat-...`, `172.22.0.0/16 → pcx-...` |
+| VPC > Route tables > workstation's route table > Routes | its old routes (local, `0.0.0.0/0 → igw-...`) and **new** `172.21.0.0/16 → pcx-...` |
+
+Quick test from the workstation (there are no servers yet, so this only shows the route):
+
+```bash
+ip route get 172.21.10.10    # goes via the VPC router 172.22.x.1 as usual; AWS does the rest
+```
+
+The real test comes in stage 2: `ssh` from the workstation to a Slurm server's private IP.
+
+**Cost:** a peering connection is free. Traffic over it inside one AZ is free; across AZs
+it is ~$0.01/GB each way (workstation and Slurm are both in ap-south-2a).

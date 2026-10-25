@@ -42,3 +42,16 @@ variable "private_subnet_cidr" {
   description = "CIDR block for the private subnet (Slurm servers)."
   type        = string
 }
+
+# ---------------------------------------------------------------------------
+# Workstation (created by hand in the console; Terraform only reads it)
+# ---------------------------------------------------------------------------
+variable "workstation_vpc_id" {
+  description = "ID of workstation-vpc."
+  type        = string
+}
+
+variable "workstation_subnet_id" {
+  description = "ID of the workstation's subnet; used to find its route table."
+  type        = string
+}

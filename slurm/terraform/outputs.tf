@@ -43,3 +43,13 @@ output "private_route_table_id" {
   description = "ID of the private route table."
   value       = aws_route_table.private.id
 }
+
+output "peering_connection_id" {
+  description = "ID of the VPC peering connection to workstation-vpc."
+  value       = aws_vpc_peering_connection.workstation.id
+}
+
+output "workstation_route_table_id" {
+  description = "Existing workstation route table that got the route to 172.21.0.0/16."
+  value       = data.aws_route_table.workstation.id
+}
