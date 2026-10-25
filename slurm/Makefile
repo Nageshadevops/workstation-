@@ -6,7 +6,10 @@ TF := terraform -chdir=terraform
 # kept across destroy/apply. Must match ssh_public_key_path in terraform.tfvars.
 SSH_KEY := $(HOME)/.ssh/slurm-dev-key
 
-.PHONY: help init fmt validate key plan apply destroy output
+# Server for `make ssh`; override with: make ssh HOST=slurm-node-1
+HOST ?= slurm-master
+
+.PHONY: help init fmt validate key plan apply destroy output ssh
 
 help:
 	@echo "Usage: make <target>"
@@ -18,6 +21,7 @@ help:
 	@echo "  apply     apply the saved plan (run make plan first)"
 	@echo "  destroy   delete everything Terraform created"
 	@echo "  output    show the outputs (IDs, IPs, ...)"
+	@echo "  ssh       log in to a Slurm server: make ssh [HOST=slurm-node-1]"
 
 init:
 	$(TF) init
@@ -46,3 +50,10 @@ destroy:
 
 output:
 	$(TF) output
+
+# Looks up the private IP in the Terraform outputs, so it works after every re-create.
+# Servers get new host keys on every re-create, so known_hosts is not used (lab only,
+# private network reachable only from the workstation).
+ssh:
+	ssh -i $(SSH_KEY) -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	  ec2-user@$$($(TF) output -json instances | jq -r '."$(HOST)".private_ip')

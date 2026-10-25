@@ -63,3 +63,18 @@ output "security_group_id" {
   description = "Security group of the Slurm servers."
   value       = aws_security_group.slurm.id
 }
+
+output "instances" {
+  description = "Slurm servers: ID and private IP."
+  value = {
+    for name, inst in aws_instance.this : name => {
+      id         = inst.id
+      private_ip = inst.private_ip
+    }
+  }
+}
+
+output "ami" {
+  description = "RHEL 9 image used for new servers."
+  value       = "${data.aws_ami.rhel9.name} (${data.aws_ami.rhel9.id})"
+}

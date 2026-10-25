@@ -22,3 +22,8 @@ workstation_private_ip = "172.22.7.210"
 # Compute
 # ---------------------------------------------------------------------------
 ssh_public_key_path = "~/.ssh/slurm-dev-key.pub" # created by `make plan` if missing (SSH_KEY in Makefile)
+
+# One entry = one server. Step 2.4 adds the 3 nodes here.
+instances = {
+  "slurm-master" = { instance_type = "t3.medium" } # 2 vCPU / 4 GB
+}

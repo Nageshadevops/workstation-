@@ -68,3 +68,16 @@ variable "ssh_public_key_path" {
   description = "Public key (made by `make plan` with ssh-keygen) for logging in to the Slurm servers."
   type        = string
 }
+
+variable "instances" {
+  description = "Slurm servers to create. Key = server name (also the Name tag), value = settings."
+  type = map(object({
+    instance_type = string
+  }))
+}
+
+variable "root_volume_size" {
+  description = "Root disk size in GiB for every server (room for the Slurm build and MariaDB)."
+  type        = number
+  default     = 30
+}

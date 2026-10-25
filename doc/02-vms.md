@@ -154,3 +154,100 @@ make output   # security_group_id added
 Nothing can be tested yet: there are no servers. That is step 2.3.
 
 **Cost:** security groups are free.
+
+---
+
+## Step 2.3: slurm-master
+
+The first server. Everything built so far comes together here:
+
+| Setting | Comes from | Step |
+|---|---|---|
+| `subnet_id` | `aws_subnet.private` | 1.2 |
+| internet (outgoing) | private route table → NAT gateway | 1.4 |
+| reachable from the workstation | peering + routes | 1.5 |
+| `key_name` | `aws_key_pair.slurm` | 2.1 |
+| `vpc_security_group_ids` | `aws_security_group.slurm` | 2.2 |
+
+**Code:** new file `ec2.tf`, two new variables (`instances`, `root_volume_size`):
+
+| Block | What |
+|---|---|
+| `data.aws_ami.rhel9` | looks up the newest RHEL 9 image from Red Hat (owner 309956199498), like picking it in the console |
+| `aws_instance.this` | one EC2 instance **per entry in `instances`** (`for_each`) |
+
+Instance settings:
+
+| Setting | Value | Why |
+|---|---|---|
+| `instance_type` | t3.medium (from tfvars) | master runs slurmctld + slurmdbd + MariaDB, and compiles Slurm |
+| `subnet_id` | private subnet | no direct internet access in |
+| `associate_public_ip_address` | false | private IP only |
+| `metadata_options.http_tokens` | required | IMDSv2 only, same as the workstation |
+| `root_block_device` | 30 GiB gp3, encrypted | room for the Slurm build and MariaDB |
+| `tags.Name` | slurm-master | name in the console |
+| `tags.Role` | master / node | `condition ? a : b` = if/else |
+| `lifecycle.ignore_changes = [ami]` | | a newer RHEL image must not replace running servers |
+
+**New idea: `for_each`.** One resource block creates one instance per map entry:
+
+```hcl
+instances = {
+  "slurm-master" = { instance_type = "t3.medium" }   # each.key = "slurm-master"
+}                                                     # each.value.instance_type = "t3.medium"
+```
+
+In the state they are called `aws_instance.this["slurm-master"]`. Step 2.4 only adds three lines
+to `instances` in `terraform.tfvars`; no new resource code.
+
+The output `instances` uses a `for` expression to print a small map, name → id and private IP.
+
+**New: `make ssh`.** It reads the private IP from `terraform output` and logs in with
+`~/.ssh/slurm-dev-key` as `ec2-user`, so you never copy IPs by hand (they change on every
+re-create). `make ssh HOST=slurm-node-1` for another server. It skips the known_hosts check,
+because re-created servers get new host keys. Acceptable here: the servers are only
+reachable from the workstation over the private network.
+
+**Run on the workstation:**
+
+```bash
+cd ~/workstation- && git pull && cd slurm
+make plan     # expect: Plan: 1 to add, 0 to change, 0 to destroy.
+make apply    # ~30 s; the server needs another 1-2 minutes to boot
+make output   # instances = { "slurm-master" = { id = "i-...", private_ip = "172.21.10.x" } }
+```
+
+**Test from the workstation:**
+
+```bash
+ping -c 3 <private_ip>            # peering + ICMP rule
+make ssh                          # peering + SSH rule + key
+
+# on slurm-master:
+hostname -I                       # 172.21.10.x, no public IP
+curl -s https://checkip.amazonaws.com   # must print nat_public_ip (make output): internet via NAT
+sudo dnf -y check-update | tail -3      # Red Hat repos reachable
+exit
+```
+
+| Test fails | Check |
+|---|---|
+| `ping` / `ssh` time out | peering Active? workstation route table has `172.21.0.0/16 → pcx-`? `slurm-dev-sg` allows 172.22.7.210? |
+| `Permission denied (publickey)` | user must be `ec2-user`; key pair in the console is `slurm-dev-key` |
+| `curl` / `dnf` hang on the server | private route table has `0.0.0.0/0 → nat-`? NAT gateway Available? |
+
+**Check in the console** (EC2 > **Instances**):
+
+| Tab | What you should see |
+|---|---|
+| Details | `slurm-master`, Running, t3.medium, AMI `RHEL-9.x...`, Private IPv4 172.21.10.x, **no** Public IPv4, Key pair `slurm-dev-key`, IMDSv2 Required |
+| Networking | VPC slurm-dev-vpc, subnet `slurm-dev-private-ap-south-2a` |
+| Security | security group `slurm-dev-sg` |
+| Storage | 30 GiB gp3, Encrypted |
+| Status checks | 2/2 checks passed (after ~2 minutes) |
+
+The hostname will look like `ip-172-21-10-x`. Ansible sets it to `slurm-master` in stage 3.
+
+**Cost:** t3.medium in ap-south-2 with the hourly RHEL licence is roughly $0.07–0.10/hour,
+plus the 30 GiB disk (~$3/month). Check the current price in the EC2 console's launch page if
+it matters. Stopping an instance stops the hourly charge (not the disk); `make destroy` stops both.
