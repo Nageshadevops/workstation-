@@ -31,8 +31,15 @@ To log in to an EC2 instance you need a **key pair**. The public key goes on the
 (in `~/.ssh/authorized_keys`), and the private key stays with you. AWS stores only the public key
 under a name (`slurm-dev-key`) and puts it on every new instance launched with that name.
 
-We make the key **on the workstation** with `ssh-keygen`, and Terraform uploads only the public
-half. The private key is never in Terraform state, git or AWS.
+The key is made **automatically on the workstation**: `make plan` first runs the Makefile
+target `key`, which calls `ssh-keygen` **only if `~/.ssh/slurm-dev-key.pub` does not exist**.
+Terraform uploads only the public half. The private key is never in Terraform state, git or AWS.
+
+- No manual step: a new admin runs `git pull` and `make plan`, and gets their own key.
+- `make destroy` deletes the key pair **in AWS** but not the files in `~/.ssh`, so the next
+  `make apply` uploads the same key again, and the same key works for the new servers.
+- Not chosen: generating the key inside Terraform (`tls_private_key`). That is also automatic,
+  but the private key is then stored in plain text in the state file.
 
 | File (on the workstation) | What | Share? |
 |---|---|---|
@@ -52,19 +59,30 @@ half. The private key is never in Terraform state, git or AWS.
 **Run on the workstation:**
 
 ```bash
-# 1. make the key (once). -N "" = no passphrase, so Ansible can use it without asking.
-ssh-keygen -t ed25519 -f ~/.ssh/slurm-dev-key -N "" -C "slurm-dev"
-ls -l ~/.ssh/slurm-dev-key*     # private: -rw-------, public: -rw-r--r--
-
-# 2. upload the public key
 cd ~/workstation- && git pull && cd slurm
-make plan     # expect: Plan: 1 to add, 0 to change, 0 to destroy.
+make plan     # first time: runs ssh-keygen, then: Plan: 1 to add, 0 to change, 0 to destroy.
 make apply
 make output   # key_pair_name = "slurm-dev-key"
+ls -l ~/.ssh/slurm-dev-key*     # private: -rw-------, public: -rw-r--r--
 ```
 
-If `make plan` says `Invalid value for "path" parameter: no file exists`, step 1 was skipped
-or the file name is different.
+The Makefile lines that do it:
+
+```make
+SSH_KEY := $(HOME)/.ssh/slurm-dev-key
+
+key: $(SSH_KEY).pub
+
+$(SSH_KEY).pub:                 # a file target: make runs it only if the file is missing
+	mkdir -p -m 700 $(HOME)/.ssh
+	ssh-keygen -t ed25519 -f $(SSH_KEY) -N "" -C "slurm-dev"
+
+plan: key                       # plan needs the key first
+```
+
+`-N ""` = no passphrase, so Ansible can use the key without asking. `make key` creates the key
+on its own, without planning. `SSH_KEY` in the Makefile and `ssh_public_key_path` in
+`terraform.tfvars` must point to the same file.
 
 **Check in the console:** EC2 > Network & Security > **Key pairs**: `slurm-dev-key`, type
 **ED25519**. Compare its fingerprint with the workstation:

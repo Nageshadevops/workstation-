@@ -60,6 +60,6 @@ variable "workstation_subnet_id" {
 # Compute
 # ---------------------------------------------------------------------------
 variable "ssh_public_key_path" {
-  description = "Public key (made with ssh-keygen on the workstation) for logging in to the Slurm servers."
+  description = "Public key (made by `make plan` with ssh-keygen) for logging in to the Slurm servers."
   type        = string
 }

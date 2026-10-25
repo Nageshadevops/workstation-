@@ -20,4 +20,4 @@ workstation_subnet_id = "subnet-0c71b9f5fd4fb972f" # workstation-subnet-public1-
 # ---------------------------------------------------------------------------
 # Compute
 # ---------------------------------------------------------------------------
-ssh_public_key_path = "~/.ssh/slurm-dev-key.pub" # on the workstation, see doc/02-vms.md step 2.1
+ssh_public_key_path = "~/.ssh/slurm-dev-key.pub" # created by `make plan` if missing (SSH_KEY in Makefile)
