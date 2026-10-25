@@ -47,8 +47,8 @@ and is not in git. If it is lost, Terraform no longer knows what it created.
 | 1 VPC | 1.4 | NAT gateway + private route table | Done | 2026-10-25 |
 | 1 VPC | 1.5 | VPC peering to workstation-vpc | Done | 2026-10-25 |
 | 1 VPC | 1.6 | Destroy / apply test | Done (destroy 2026-10-24, apply 2026-10-25) | 2026-10-25 |
-| 2 VMs | 2.1 | SSH key pair `slurm-dev-key` | Code ready | 2026-10-25 |
-| 2 VMs | 2.2 | Security group | To do | |
+| 2 VMs | 2.1 | SSH key pair `slurm-dev-key` (created by `make plan`) | Done | 2026-10-25 |
+| 2 VMs | 2.2 | Security group `slurm-dev-sg` + default SG emptied | Code ready | 2026-10-25 |
 | 2 VMs | 2.3 | slurm-master + SSH / NAT test | To do | |
 | 2 VMs | 2.4 | slurm-node-1..3 | To do | |
 | 3 Slurm | | Ansible: munge, Slurm, slurmdbd | To do | |

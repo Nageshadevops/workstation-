@@ -96,3 +96,61 @@ Slurm servers. Recovery means a new key and new instances. A copy in a safe plac
 is fine (never in git).
 
 **Cost:** key pairs are free.
+
+---
+
+## Step 2.2: Security group
+
+A **security group** is a firewall attached to each server's network interface.
+
+- **Inbound:** nothing gets in unless a rule allows it.
+- **Outbound:** controlled by egress rules (we allow all).
+- **Stateful:** replies to allowed traffic always pass, in both directions, without extra rules.
+- A rule's source can be an IP range (`cidr_ipv4`) or **another security group**: "every server
+  that has security group X".
+
+**Code:** new file `security.tf`, one new variable (`workstation_private_ip`):
+
+| Resource | Console | Rule |
+|---|---|---|
+| `aws_security_group.slurm` | Security groups > `slurm-dev-sg` | the group itself, in slurm-dev-vpc |
+| `aws_vpc_security_group_ingress_rule.slurm_self` | Inbound rules | **All traffic** from `slurm-dev-sg` (Slurm servers to each other) |
+| `aws_vpc_security_group_ingress_rule.ssh_from_workstation` | Inbound rules | **TCP 22** from `172.22.7.210/32` |
+| `aws_vpc_security_group_ingress_rule.ping_from_workstation` | Inbound rules | **ICMP** from `172.22.7.210/32` |
+| `aws_vpc_security_group_egress_rule.all` | Outbound rules | All traffic to `0.0.0.0/0` |
+| `aws_default_security_group.this` | Security groups > `slurm-dev-default-sg-unused` | VPC's default group, **all rules removed** |
+
+Why these rules:
+
+- **Self rule:** Slurm uses several ports (munge, 6817 slurmctld, 6818 slurmd, 6819 slurmdbd)
+  plus random ports for `srun`, and the nodes SSH to each other. Allowing all traffic *inside the
+  group* covers this, while nothing outside the group gets in.
+- **SSH only from the workstation:** Terraform and Ansible run there; nobody else needs to log in.
+  `/32` means exactly one address. The traffic arrives over the VPC peering with the
+  workstation's private IP as the source.
+- **No rule from the internet:** the servers have no public IP anyway (defence in depth).
+- **Default security group:** AWS creates one in every VPC that lets its members talk freely.
+  `aws_default_security_group` with no rules empties it, so a server launched without
+  `slurm-dev-sg` by mistake is cut off instead of open.
+
+Compared to the workstation's `workstation-sg` (SSH from `0.0.0.0/0`), this group is much stricter.
+
+**Run on the workstation:**
+
+```bash
+cd ~/workstation- && git pull && cd slurm
+make plan     # expect: Plan: 6 to add, 0 to change, 0 to destroy.
+make apply
+make output   # security_group_id added
+```
+
+**Check in the console** (EC2 > Network & Security > **Security Groups**, filter VPC `slurm-dev-vpc`):
+
+| Group | Inbound rules | Outbound rules |
+|---|---|---|
+| `slurm-dev-sg` | All traffic from `sg-...` (itself); SSH 22 from 172.22.7.210/32; All ICMP-IPv4 from 172.22.7.210/32 | All traffic 0.0.0.0/0 |
+| `slurm-dev-default-sg-unused` (group name `default`) | none | none |
+
+Nothing can be tested yet: there are no servers. That is step 2.3.
+
+**Cost:** security groups are free.

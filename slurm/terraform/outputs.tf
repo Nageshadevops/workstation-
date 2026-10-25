@@ -58,3 +58,8 @@ output "key_pair_name" {
   description = "EC2 key pair used by the Slurm servers."
   value       = aws_key_pair.slurm.key_name
 }
+
+output "security_group_id" {
+  description = "Security group of the Slurm servers."
+  value       = aws_security_group.slurm.id
+}

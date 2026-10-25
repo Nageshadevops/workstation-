@@ -56,6 +56,11 @@ variable "workstation_subnet_id" {
   type        = string
 }
 
+variable "workstation_private_ip" {
+  description = "Private IP of the workstation; the only address allowed to SSH to the Slurm servers."
+  type        = string
+}
+
 # ---------------------------------------------------------------------------
 # Compute
 # ---------------------------------------------------------------------------
