@@ -55,3 +55,11 @@ variable "workstation_subnet_id" {
   description = "ID of the workstation's subnet; used to find its route table."
   type        = string
 }
+
+# ---------------------------------------------------------------------------
+# Compute
+# ---------------------------------------------------------------------------
+variable "ssh_public_key_path" {
+  description = "Public key (made with ssh-keygen on the workstation) for logging in to the Slurm servers."
+  type        = string
+}

@@ -374,5 +374,8 @@ ip route get 172.21.10.10    # goes via the VPC router 172.22.x.1 as usual; AWS 
 
 The real test comes in stage 2: `ssh` from the workstation to a Slurm server's private IP.
 
+**Result (2026-10-25):** applied together with the re-create of steps 1.1-1.4; peering Active,
+routes on both sides. Stage 1 complete.
+
 **Cost:** a peering connection is free. Traffic over it inside one AZ is free; across AZs
 it is ~$0.01/GB each way (workstation and Slurm are both in ap-south-2a).

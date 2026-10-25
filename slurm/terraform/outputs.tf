@@ -53,3 +53,8 @@ output "workstation_route_table_id" {
   description = "Existing workstation route table that got the route to 172.21.0.0/16."
   value       = data.aws_route_table.workstation.id
 }
+
+output "key_pair_name" {
+  description = "EC2 key pair used by the Slurm servers."
+  value       = aws_key_pair.slurm.key_name
+}

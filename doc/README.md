@@ -19,6 +19,7 @@ laptop  --SSH-->  workstation (workstation-vpc 172.22.0.0/16)
 |---|---|
 | [Workstation-Setup.docx](Workstation-Setup.docx) | How the workstation VM was set up (console, by hand) |
 | [01-vpc.md](01-vpc.md) | Stage 1: the Slurm VPC (Terraform) |
+| [02-vms.md](02-vms.md) | Stage 2: SSH key, security group, the 4 VMs (Terraform) |
 
 ## How we work
 
@@ -43,8 +44,11 @@ and is not in git. If it is lost, Terraform no longer knows what it created.
 | 1 VPC | 1.1 | VPC `slurm-dev-vpc` 172.21.0.0/16 (vpc-05a381e41ccd6dbac) | Done | 2026-10-24 |
 | 1 VPC | 1.2 | Public + private subnet | Done | 2026-10-24 |
 | 1 VPC | 1.3 | Internet gateway + public route table | Done | 2026-10-24 |
-| 1 VPC | 1.4 | NAT gateway + private route table | Code ready (destroyed overnight 2026-10-24) | 2026-10-24 |
-| 1 VPC | 1.5 | VPC peering to workstation-vpc | Code ready | 2026-10-25 |
-| 1 VPC | 1.6 | Destroy / apply test | Partly done (destroy 2026-10-24, re-apply 2026-10-25) | |
-| 2 VMs | | slurm-master + 3 nodes | To do | |
+| 1 VPC | 1.4 | NAT gateway + private route table | Done | 2026-10-25 |
+| 1 VPC | 1.5 | VPC peering to workstation-vpc | Done | 2026-10-25 |
+| 1 VPC | 1.6 | Destroy / apply test | Done (destroy 2026-10-24, apply 2026-10-25) | 2026-10-25 |
+| 2 VMs | 2.1 | SSH key pair `slurm-dev-key` | Code ready | 2026-10-25 |
+| 2 VMs | 2.2 | Security group | To do | |
+| 2 VMs | 2.3 | slurm-master + SSH / NAT test | To do | |
+| 2 VMs | 2.4 | slurm-node-1..3 | To do | |
 | 3 Slurm | | Ansible: munge, Slurm, slurmdbd | To do | |
