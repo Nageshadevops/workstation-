@@ -251,3 +251,69 @@ The hostname will look like `ip-172-21-10-x`. Ansible sets it to `slurm-master` 
 **Cost:** t3.medium in ap-south-2 with the hourly RHEL licence is roughly $0.07–0.10/hour,
 plus the 30 GiB disk (~$3/month). Check the current price in the EC2 console's launch page if
 it matters. Stopping an instance stops the hourly charge (not the disk); `make destroy` stops both.
+
+---
+
+## Step 2.4: slurm-node-1, -2, -3
+
+**Code:** no new resources. Three lines added to `instances` in `terraform.tfvars`:
+
+```hcl
+instances = {
+  "slurm-master" = { instance_type = "t3.medium" }
+  "slurm-node-1" = { instance_type = "t3.micro" }
+  "slurm-node-2" = { instance_type = "t3.micro" }
+  "slurm-node-3" = { instance_type = "t3.micro" }
+}
+```
+
+`for_each` in `ec2.tf` now creates `aws_instance.this["slurm-node-1"]` and the others with the
+same settings as the master (private subnet, `slurm-dev-sg`, `slurm-dev-key`, IMDSv2, 30 GiB
+encrypted disk); only the type and the tags differ (`Role = node`).
+
+Because instances are keyed by **name**, not by position, adding or removing one entry never
+touches the others. `slurm-master` stays as it is: the plan shows `3 to add, 0 to change`.
+
+t3.micro has only 1 GB RAM. That is enough to run test jobs, but too little to compile Slurm
+or run a large `dnf` transaction comfortably; stage 3 adds swap and compiles only on the master.
+
+**Run on the workstation:**
+
+```bash
+cd ~/workstation- && git pull && cd slurm
+make plan     # expect: Plan: 3 to add, 0 to change, 0 to destroy.
+make apply
+make output   # instances now lists 4 servers with their private IPs
+```
+
+**Test from the workstation:**
+
+```bash
+for h in slurm-master slurm-node-1 slurm-node-2 slurm-node-3; do
+  echo "== $h"; make -s ssh HOST=$h <<< 'hostname -I; curl -s https://checkip.amazonaws.com'
+done
+```
+
+Every server must print its own 172.21.10.x address and the same NAT public IP.
+
+Between the servers (the self rule of `slurm-dev-sg`), from slurm-master:
+
+```bash
+make ssh
+ping -c 2 <slurm-node-1 private IP>   # works: same security group
+exit
+```
+
+**Check in the console:** EC2 > Instances: 4 servers Running, 2/2 checks, all in
+`slurm-dev-private-ap-south-2a` with private IPs only. VPC > slurm-dev-vpc > Resource map
+now shows the network interfaces in the private subnet.
+
+**Cost:** each t3.micro with RHEL is roughly $0.03–0.05/hour plus its disk. With the master,
+NAT gateway and Elastic IP, the whole stack is roughly $0.20–0.30/hour; run `make destroy`
+when you stop for the day.
+
+### Stage 2 complete
+
+Run `make destroy` and `make apply` once to prove the full stack comes back: expect
+`Plan: 26 to add` (stage 1: 15, key pair: 1, security group + rules + default SG: 6,
+instances: 4), and `make ssh` works again without any manual step.
