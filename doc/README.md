@@ -57,6 +57,6 @@ and is not in git. If it is lost, Terraform no longer knows what it created.
 | 3 Slurm | 3.3 | Packages + munge | Done | 2026-10-26 |
 | 3 Slurm | 3.4 | Build Slurm on master, copy to nodes | Done | 2026-10-26 |
 | 3 Slurm | 3.5 | MariaDB + slurmdbd | Done | 2026-10-26 |
-| 3 Slurm | 3.6 | slurm.conf + services → `sinfo` | Code ready | 2026-10-26 |
-| 3 Slurm | 3.7 | Accounting + test jobs | To do | |
+| 3 Slurm | 3.6 | slurm.conf + services → `sinfo` | Done | 2026-10-26 |
+| 3 Slurm | 3.7 | Accounting: account `default`, users root + ec2-user | Code ready | 2026-10-26 |
 | 3 Slurm | 3.8 | Extras: SSH between nodes, X11 | To do | |

@@ -69,3 +69,13 @@ slurmdbd_db_password_file: /root/.slurmdbd_db_password
 # ---------------------------------------------------------------------------
 cluster_name: slurmcluster # same as on-prem
 # slurm_service (slurmctld or slurmd) is set per group in master.yml / nodes.yml.
+
+# ---------------------------------------------------------------------------
+# Step 3.7: accounting (cluster, account and users in slurmdbd)
+# ---------------------------------------------------------------------------
+slurm_account: default
+# Linux users whose jobs are recorded under slurm_account.
+# Add a user here (it must exist on every server) and rerun the playbook.
+slurm_users:
+  - root
+  - ec2-user

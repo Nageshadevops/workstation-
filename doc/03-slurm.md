@@ -553,3 +553,84 @@ exit
 | `Zero Bytes were transmitted` / auth errors | munge on both sides; `munge -n \| unmunge` |
 | node `drain` with "Low RealMemory" | node has less RAM than `RealMemory`; check `free -m` |
 | `sinfo: command not found` | log in again (`/etc/profile.d/slurm.sh` is read at login) |
+
+**Result (2026-10-26):** recap `changed=7 failed=0` on all 4; test printed
+`debug* up infinite 3 idle slurm-node-[1-3]`. First jobs as ec2-user:
+
+| Job | Command | State |
+|---|---|---|
+| 1, 2 | `srun xclock` | FAILED 2:0: xclock not installed on the nodes yet (step 3.8) |
+| 3 | `srun -N3 hostname` | COMPLETED, 6 CPUs on 3 nodes |
+| 4 | `srun -N2 -n4 hostname` | COMPLETED |
+| 5 | `sbatch --wrap="hostname; sleep 30"` | RUNNING, then COMPLETED |
+
+`sacct` already listed them: slurmctld registered cluster `slurmcluster` in slurmdbd by
+itself on first contact. The **Account** column was empty: no account or users yet (step 3.7).
+
+Each job has steps: `N.extern` (Slurm's helper step on every node, from `PrologFlags`),
+`N.0` (the first `srun`), `N.batch` (the script of an `sbatch` job).
+
+---
+
+## Step 3.7: Accounting (cluster, account, users)
+
+slurmdbd stores **associations**: cluster → account → user. A job is recorded under the user's
+default account; reports (`sreport`) and later limits or fair-share work per association.
+
+| Level | Value |
+|---|---|
+| cluster | slurmcluster (registered by slurmctld itself; the play adds it if missing) |
+| account | `default` (`slurm_account`) |
+| users | `root`, `ec2-user` (`slurm_users`) |
+
+Accounting is **recorded but not enforced** (`AccountingStorageEnforce` is not set, as on-prem):
+users without an association can still run jobs; their jobs just have no account.
+
+**Play `Accounting`** (master, tag `accounting`). For each level: read what exists, add only
+what is missing:
+
+| Read | Add (only if missing) |
+|---|---|
+| `sacctmgr -n -P show cluster format=cluster` | `sacctmgr -i add cluster slurmcluster` |
+| `sacctmgr -n -P show account format=account` | `sacctmgr -i add account default Cluster=slurmcluster` |
+| `sacctmgr -n -P show association where account=default format=user` | `sacctmgr -i add user <user> Account=default Cluster=slurmcluster` (loop over `slurm_users`) |
+
+`-n` = no header, `-P` = plain output (one value per line), `-i` = do not ask for confirmation.
+`environment: PATH` puts `/usr/local/slurm/bin` on the PATH for these tasks.
+
+The old `aws-infra` ran `sacctmgr add` every time with `failed_when: false`, which hides real
+errors. Reading first keeps it idempotent **and** lets real errors fail the run.
+
+**Add a user later:** the Linux user must exist on every server (same uid), then add it to
+`slurm_users` in `group_vars/all.yml` and run `make ansible-slurm ARGS="--tags accounting"`.
+
+**Run on the workstation:**
+
+```bash
+cd ~/workstation- && git pull && cd slurm
+make ansible-slurm ARGS="--tags accounting"   # only this play
+make ansible-slurm                            # everything: changed=0
+```
+
+Expected output of "Print the associations":
+
+```
+slurmcluster    default
+slurmcluster    default    ec2-user
+slurmcluster    default    root
+slurmcluster    root                 <- the built-in root account, made by Slurm
+slurmcluster    root       root
+```
+
+**Try it** (on slurm-master):
+
+```bash
+make ssh
+srun -N3 hostname
+sacct -X --format=JobID,JobName,Account,User,State,Elapsed   # new job: Account = default
+sacctmgr show association format=cluster,account,user
+sreport cluster utilization                                  # usage report
+exit
+```
+
+`-X` shows only the job itself, not its steps. Jobs from before this step keep an empty Account.
