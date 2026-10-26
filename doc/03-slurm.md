@@ -199,3 +199,84 @@ exit
 If `ansible.posix.selinux` is not found: the workstation has only `ansible-core`. The full
 `ansible` pip package (installed in the workstation setup) includes `ansible.posix`.
 Check with `ansible-galaxy collection list | grep posix`.
+
+**Result (2026-10-26):** real run `failed=0` on all 4; second run `ok=10 changed=0 skipped=2`
+on all 4 (idempotent). firewalld is not installed on these RHEL images (task skipped).
+slurm-node-1 shows hostname `slurm-node-1` at login.
+
+---
+
+## Step 3.3: Packages + munge
+
+**munge** is how Slurm servers prove who they are. Every message between Slurm daemons carries
+a munge *credential*, signed with a secret key. A server accepts it only if it has the
+**same key** and its clock is close (credentials expire after a few minutes).
+
+**Variables** (`group_vars/all.yml`): `crb_repo` and `slurm_packages` (list from the on-prem notes).
+
+**Four new plays in `slurm.yml`:**
+
+| Play | Hosts | Tag | Tasks |
+|---|---|---|---|
+| Packages | all | `packages` | enable CodeReady Builder repo; install `slurm_packages` |
+| Munge key on the master | master | `munge` | create `/etc/munge/munge.key` (once); read it into memory |
+| Munge on every server | all | `munge` | copy the key to the nodes; folder owners; start + enable munge |
+| Munge test | all | `munge` | `munge -n` on the master, `unmunge` of that credential on every server |
+
+Details:
+
+- **CodeReady Builder (CRB):** Red Hat repo with most `-devel` packages, off by default.
+  `community.general.dnf_config_manager` = `dnf config-manager --set-enabled ...`, but idempotent.
+- **Packages on every server:** Slurm is compiled once on the master (step 3.4); the nodes need
+  the same runtime libraries. The `-devel` packages pull them in.
+- **Order matters:** the `munge` user (uid 791) was created in step 3.2 **before** the munge
+  package. The package then uses the existing user instead of creating one with a random uid.
+- **The key:** 1024 random bytes, stored as base64 text (`head -c 1024 /dev/urandom | base64 -w0`),
+  owner munge, mode 0400. Created only if missing (`creates:`), so re-runs keep the same key.
+  RHEL 9's munge 0.5.13 has no `mungekey` command.
+- **Copying a secret without a file:** `slurp` reads the key from the master into Ansible's
+  memory, and `copy content:` writes it on the nodes. The old `aws-infra` code fetched it to
+  `ansible/files/munge.key` on the laptop; now the secret never touches the workstation's disk.
+  `no_log: true` keeps it out of the output.
+- **Handlers:** `notify: Restart munge` queues a restart; the handler runs **once** at the end of
+  the play, and only if the key actually changed.
+- **`hostvars[groups['master'][0]].munge_key`:** a node reads a variable registered on the
+  master in an earlier play.
+- **The test** is part of the playbook, so every run proves munge works across servers.
+  `changed_when: false`: a check is never a change.
+
+**Run on the workstation:**
+
+```bash
+cd ~/workstation- && git pull && cd slurm
+make ansible-slurm ARGS="--check --diff --tags packages"   # dry run of the package part only
+make ansible-slurm      # real run; the package install takes a few minutes per node
+make ansible-slurm      # again: changed=0
+```
+
+A dry run of the **whole** playbook fails before the first real run: munge is not installed
+yet, so "Start munge" cannot find the service. `--check` cannot simulate a service that an
+earlier task *would* install. The tasks that need the real key or a running munge are skipped
+in check mode (`when: not ansible_check_mode`).
+
+**Expected:** task "Decode the master's credential on every server" → `ok` on all 4.
+
+**Check by hand** (on slurm-master):
+
+```bash
+make ssh
+sudo md5sum /etc/munge/munge.key                  # remember the checksum
+munge -n | unmunge | grep STATUS                  # STATUS: Success (0)
+exit
+make ssh HOST=slurm-node-2
+sudo md5sum /etc/munge/munge.key                  # same checksum as the master
+systemctl is-active munge                         # active
+exit
+```
+
+| Error | Cause |
+|---|---|
+| `No package ... available` | CRB repo not enabled; check `dnf repolist` on the node |
+| dnf killed / out of memory on a node | swap from step 3.2 missing: `free -m` |
+| `unmunge: Error: Invalid credential` | keys differ: compare `md5sum` |
+| `unmunge: Error: Expired credential` | clocks differ: `timedatectl` (chronyd should be active) |

@@ -10,3 +10,36 @@ slurm_uid: 792
 
 # The nodes have only 1 GB RAM; dnf and Slurm run out of memory without swap.
 swap_size_mb: 2048
+
+# ---------------------------------------------------------------------------
+# Step 3.3: packages + munge
+# ---------------------------------------------------------------------------
+# RHEL repo with most -devel packages (off by default). Name on AWS (RHUI) images.
+crb_repo: codeready-builder-for-rhel-9-rhui-rpms
+
+# From the on-prem notes (slurmconfigurationsetup.txt), adjusted for RHEL 9:
+# gtk2-devel is not needed; libibverbs-devel is part of rdma-core-devel.
+# Installed on every server: the -devel packages also pull in the runtime
+# libraries that the Slurm build (made on the master) needs on the nodes.
+slurm_packages:
+  - munge
+  - munge-libs
+  - munge-devel
+  - openssl
+  - openssl-devel
+  - pam-devel
+  - numactl
+  - numactl-devel
+  - hwloc
+  - hwloc-devel
+  - lua
+  - lua-devel
+  - readline-devel
+  - rrdtool-devel
+  - ncurses-devel
+  - rdma-core-devel
+  - mariadb-devel
+  - json-c-devel
+  - dbus-devel
+  - libbpf-devel
+  - bzip2

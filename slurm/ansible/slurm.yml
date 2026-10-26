@@ -87,3 +87,109 @@
       loop:
         - { name: munge, id: "{{ munge_uid }}" }
         - { name: slurm, id: "{{ slurm_uid }}" }
+
+# ---------------------------------------------------------------------------
+# Step 3.3a: packages on every server
+# ---------------------------------------------------------------------------
+- name: Packages
+  hosts: all
+  become: true
+  tags: packages
+  tasks:
+    - name: Enable the CodeReady Builder repo (most -devel packages are there)
+      community.general.dnf_config_manager:
+        name: "{{ crb_repo }}"
+        state: enabled
+
+    - name: Install munge and the libraries Slurm needs (a few minutes on the small nodes)
+      ansible.builtin.dnf:
+        name: "{{ slurm_packages }}"
+        state: present
+
+# ---------------------------------------------------------------------------
+# Step 3.3b: munge, the same secret key on every server
+# The key is made once on the master and copied to the nodes through Ansible's
+# memory (slurp + copy). It is never written to the workstation's disk.
+# ---------------------------------------------------------------------------
+- name: Munge key on the master
+  hosts: master
+  become: true
+  tags: munge
+  tasks:
+    # RHEL 9's munge has no "mungekey" command. The key is 1024 random bytes,
+    # written as base64 TEXT: munge accepts any content as key, and Ansible can
+    # only copy text (raw random bytes would be corrupted on the way).
+    - name: Create the munge key (only if it does not exist)
+      ansible.builtin.shell: >
+        head -c 1024 /dev/urandom | base64 -w0 > /etc/munge/munge.key &&
+        chown munge:munge /etc/munge/munge.key &&
+        chmod 400 /etc/munge/munge.key
+      args:
+        creates: /etc/munge/munge.key
+
+    # Needs the real key file, so skipped in a dry run (--check does not create it).
+    - name: Read the key into Ansible's memory
+      ansible.builtin.slurp:
+        src: /etc/munge/munge.key
+      register: munge_key
+      no_log: true # never print the secret
+      when: not ansible_check_mode
+
+- name: Munge on every server
+  hosts: all
+  become: true
+  tags: munge
+  tasks:
+    - name: Same key on every node
+      ansible.builtin.copy:
+        content: "{{ hostvars[groups['master'][0]].munge_key.content | b64decode }}"
+        dest: /etc/munge/munge.key
+        owner: munge
+        group: munge
+        mode: "0400"
+      # the master already has it; skipped in a dry run (no key was read)
+      when: inventory_hostname not in groups['master'] and not ansible_check_mode
+      no_log: true
+      notify: Restart munge
+
+    - name: munge owns its folders
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: munge
+        group: munge
+      loop: [/etc/munge, /var/log/munge, /var/lib/munge]
+
+    - name: Start munge now and at boot
+      ansible.builtin.systemd_service:
+        name: munge
+        state: started
+        enabled: true
+
+  handlers:
+    # Handlers run once at the end of the play, only if a task "notified" them.
+    - name: Restart munge
+      ansible.builtin.systemd_service:
+        name: munge
+        state: restarted
+
+# Test: a credential made on the master must be accepted by every node.
+# That only works if all servers have the same key and roughly the same time.
+# Skipped in a dry run: munge is not running yet then.
+- name: Munge test
+  hosts: all
+  become: true
+  tags: munge
+  tasks:
+    - name: Make a credential on the master
+      ansible.builtin.command: munge -n
+      register: munge_cred
+      changed_when: false
+      when: inventory_hostname in groups['master'] and not ansible_check_mode
+
+    - name: Decode the master's credential on every server
+      ansible.builtin.command:
+        cmd: unmunge
+        stdin: "{{ hostvars[groups['master'][0]].munge_cred.stdout }}"
+      changed_when: false # a test, never a change
+      when: not ansible_check_mode
