@@ -30,20 +30,14 @@
       loop: "{{ groups['all'] }}"
 
     # --- swap ------------------------------------------------------------------
-    - name: Create swap file
-      ansible.builtin.command: dd if=/dev/zero of=/swapfile bs=1M count={{ swap_size_mb }}
+    # One task, so later tasks never depend on a file that --check mode did not create.
+    - name: Create swap file (root only) and format it
+      ansible.builtin.shell: >
+        dd if=/dev/zero of=/swapfile bs=1M count={{ swap_size_mb }} &&
+        chmod 600 /swapfile &&
+        mkswap /swapfile
       args:
         creates: /swapfile # skip if the file already exists
-      register: swapfile
-
-    - name: Format swap file
-      ansible.builtin.command: mkswap /swapfile
-      when: swapfile.changed
-
-    - name: Swap file permissions (root only)
-      ansible.builtin.file:
-        path: /swapfile
-        mode: "0600"
 
     - name: Turn swap on
       ansible.builtin.command: swapon /swapfile

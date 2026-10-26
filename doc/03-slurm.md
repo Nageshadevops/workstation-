@@ -134,7 +134,7 @@ New make target: `make ansible-slurm` (= `make inventory`, then `ansible-playboo
 | Set hostname | `hostname` | `slurm-master`, `slurm-node-1`, ... (the inventory name) | Slurm identifies nodes by hostname |
 | Keep the hostname | `copy` | `/etc/cloud/cloud.cfg.d/99-preserve-hostname.cfg` | otherwise cloud-init resets it to `ip-172-21-...` at boot |
 | /etc/hosts | `lineinfile` + `loop` | one line per server: `172.21.10.x slurm-node-1` | servers find each other by name, no DNS needed |
-| Swap file | `command` (`creates:`), `file`, `lineinfile` | 2 GB `/swapfile`, on now and at boot | nodes have 1 GB RAM; dnf ran out of memory without it |
+| Swap file | `shell` (`creates:`), `command`, `lineinfile` | 2 GB `/swapfile` (dd + chmod 600 + mkswap in one task), on now and at boot | nodes have 1 GB RAM; dnf ran out of memory without it |
 | SELinux permissive | `ansible.posix.selinux` | permissive now and in `/etc/selinux/config` | Slurm/munge from `/usr/local` are blocked in enforcing mode (same as on-prem) |
 | firewalld off | `service_facts` + `systemd_service` | stopped + disabled, **only if installed** | the security group is the firewall |
 | munge / slurm users | `group`, `user` + `loop` | munge 791, slurm 792, no login shell, no home | same IDs as on-prem |
@@ -148,7 +148,7 @@ New make target: `make ansible-slurm` (= `make inventory`, then `ansible-playboo
 - **`loop`** repeats a task for each item; `{{ item }}` is the current one.
 - **Facts:** at the start, Ansible collects information about each server ("Gathering Facts"),
   e.g. `ansible_facts['swaptotal_mb']`. `when:` uses it to decide.
-- **`register`** saves a task's result (`swapfile.changed`) for later tasks.
+- **`creates:`** on `command`/`shell`: skip the task if that file already exists.
 - **`hostvars[item].ansible_host`** reads another server's inventory value (its IP).
 - **Tags** (`base`) let you run only part of the playbook: `ARGS="--tags base"`.
 
@@ -174,8 +174,14 @@ slurm-master : ok=12  changed=8  unreachable=0  failed=0  skipped=1 ...
 | `skipped` | `when:` was false (e.g. firewalld not installed) |
 | `failed` / `unreachable` | must be 0 |
 
-In `--check` mode, `command` tasks are skipped (Ansible cannot know what a command would do),
-so the dry run shows fewer changes than the real run.
+In `--check` mode, `command` and `shell` tasks are skipped (Ansible cannot know what a command
+would do); with `creates:` they are only *reported* as `changed`, without running.
+
+**Lesson learned (2026-10-26):** the first dry run failed at "Swap file permissions":
+`file (/swapfile) is absent, cannot continue`. In check mode `dd` did not really create
+`/swapfile`, so the next task (`file` with `mode: 0600`) found nothing. Nothing was changed on
+the servers (dry run). Fix: create, chmod and mkswap the file in **one** `shell` task with
+`creates: /swapfile`, so no later task depends on a file a skipped command should have made.
 
 **Check on a server:**
 
