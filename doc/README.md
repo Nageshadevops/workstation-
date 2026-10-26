@@ -17,6 +17,8 @@ laptop  --SSH-->  workstation (workstation-vpc 172.22.0.0/16)
 
 | File | What |
 |---|---|
+| [user-manual.md](user-manual.md) | **For new team members:** start, use (run jobs) and stop the cluster, step by step, with expected output |
+| [00-setup.md](00-setup.md) | Laptop + workstation setup (one time), new admins, build from zero, all make commands |
 | [Workstation-Setup.docx](Workstation-Setup.docx) | How the workstation VM was set up (console, by hand) |
 | [01-vpc.md](01-vpc.md) | Stage 1: the Slurm VPC (Terraform) |
 | [02-vms.md](02-vms.md) | Stage 2: SSH key, security group, the 4 VMs (Terraform) |
