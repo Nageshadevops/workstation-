@@ -505,45 +505,45 @@
   hosts: master
   become: true
   tags: accounting
-  environment:
-    PATH: "{{ slurm_prefix }}/bin:{{ ansible_facts.env.PATH }}"
+  vars:
+    sacctmgr: "{{ slurm_prefix }}/bin/sacctmgr" # full path: not on root's PATH in Ansible
   tasks:
     - name: Read registered clusters
-      ansible.builtin.command: sacctmgr -n -P show cluster format=cluster
+      ansible.builtin.command: "{{ sacctmgr }} -n -P show cluster format=cluster"
       register: clusters
       changed_when: false
 
     # slurmctld usually registers the cluster itself; this covers the case it did not.
     - name: Add cluster {{ cluster_name }}
-      ansible.builtin.command: sacctmgr -i add cluster {{ cluster_name }}
+      ansible.builtin.command: "{{ sacctmgr }} -i add cluster {{ cluster_name }}"
       when: cluster_name not in clusters.stdout_lines
 
     - name: Read accounts
-      ansible.builtin.command: sacctmgr -n -P show account format=account
+      ansible.builtin.command: "{{ sacctmgr }} -n -P show account format=account"
       register: accounts
       changed_when: false
 
     - name: Add account {{ slurm_account }}
       ansible.builtin.command: >
-        sacctmgr -i add account {{ slurm_account }}
+        {{ sacctmgr }} -i add account {{ slurm_account }}
         Cluster={{ cluster_name }} Description="{{ slurm_account }} account"
       when: slurm_account not in accounts.stdout_lines
 
     - name: Read users in account {{ slurm_account }}
       ansible.builtin.command: >
-        sacctmgr -n -P show association where account={{ slurm_account }} format=user
+        {{ sacctmgr }} -n -P show association where account={{ slurm_account }} format=user
       register: account_users
       changed_when: false
 
     - name: Add users to account {{ slurm_account }}
       ansible.builtin.command: >
-        sacctmgr -i add user {{ item }}
+        {{ sacctmgr }} -i add user {{ item }}
         Account={{ slurm_account }} Cluster={{ cluster_name }}
       loop: "{{ slurm_users }}"
       when: item not in account_users.stdout_lines
 
     - name: Show the associations (cluster / account / user)
-      ansible.builtin.command: sacctmgr -n show association format=cluster,account,user
+      ansible.builtin.command: "{{ sacctmgr }} -n show association format=cluster,account,user"
       register: assoc
       changed_when: false
 

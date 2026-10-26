@@ -596,7 +596,13 @@ what is missing:
 | `sacctmgr -n -P show association where account=default format=user` | `sacctmgr -i add user <user> Account=default Cluster=slurmcluster` (loop over `slurm_users`) |
 
 `-n` = no header, `-P` = plain output (one value per line), `-i` = do not ask for confirmation.
-`environment: PATH` puts `/usr/local/slurm/bin` on the PATH for these tasks.
+`sacctmgr` is called by its full path (play variable `sacctmgr: /usr/local/slurm/bin/sacctmgr`):
+`/etc/profile.d/slurm.sh` only applies to login shells, not to Ansible's commands.
+
+**Lesson learned (2026-10-26):** the first version set `environment: PATH: ...{{ ansible_facts.env.PATH }}`
+on the play and failed at "Gathering Facts": `object of type 'dict' has no attribute 'env'`.
+A play-level `environment:` applies to **every** task of the play, including fact gathering,
+which runs before the facts exist. Fix: no environment, full path to `sacctmgr`.
 
 The old `aws-infra` ran `sacctmgr add` every time with `failed_when: false`, which hides real
 errors. Reading first keeps it idempotent **and** lets real errors fail the run.
