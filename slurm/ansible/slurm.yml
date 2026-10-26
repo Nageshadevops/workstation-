@@ -280,3 +280,125 @@
       register: slurmd_version
       changed_when: false
       failed_when: slurm_version not in slurmd_version.stdout
+
+# ---------------------------------------------------------------------------
+# Step 3.5: accounting database on the master
+#   slurmctld --> slurmdbd (port 6819) --> MariaDB (port 3306, database slurm_acct_db)
+# ---------------------------------------------------------------------------
+- name: Accounting database (MariaDB + slurmdbd)
+  hosts: master
+  become: true
+  tags: slurmdbd
+  tasks:
+    # --- MariaDB -----------------------------------------------------------
+    - name: Install MariaDB server
+      ansible.builtin.dnf:
+        name: mariadb-server
+        state: present
+
+    - name: InnoDB settings recommended by SchedMD for slurmdbd
+      ansible.builtin.copy:
+        dest: /etc/my.cnf.d/innodb.cnf
+        content: |
+          [mysqld]
+          innodb_buffer_pool_size=512M
+          innodb_log_file_size=64M
+          innodb_lock_wait_timeout=900
+          max_allowed_packet=16M
+        mode: "0644"
+      notify: Restart mariadb
+
+    - name: Start MariaDB now and at boot
+      ansible.builtin.systemd_service:
+        name: mariadb
+        state: started
+        enabled: true
+
+    # Apply the InnoDB settings now (handler), before slurmdbd creates its tables.
+    - name: Run pending handlers
+      ansible.builtin.meta: flush_handlers
+
+    # --- password: generated once on the master, never in git -----------------
+    - name: Generate the database password (only if it does not exist)
+      ansible.builtin.shell: >
+        umask 077 && openssl rand -base64 24 | tr -d '/+=' > {{ slurmdbd_db_password_file }}
+      args:
+        creates: "{{ slurmdbd_db_password_file }}"
+
+    - name: Read the database password
+      ansible.builtin.slurp:
+        src: "{{ slurmdbd_db_password_file }}"
+      register: db_password_file
+      no_log: true
+
+    - name: Keep the password in a variable for the next tasks
+      ansible.builtin.set_fact:
+        slurmdbd_db_password: "{{ db_password_file.content | b64decode | trim }}"
+      no_log: true
+
+    # root logs in to MariaDB through the local socket, no password needed.
+    # IF NOT EXISTS + ALTER USER: safe to run again, password always in sync.
+    - name: Create the accounting database and its user
+      ansible.builtin.command:
+        cmd: mysql -u root
+        stdin: |
+          CREATE DATABASE IF NOT EXISTS {{ slurmdbd_db_name }};
+          CREATE USER IF NOT EXISTS '{{ slurmdbd_db_user }}'@'localhost';
+          ALTER USER '{{ slurmdbd_db_user }}'@'localhost' IDENTIFIED BY '{{ slurmdbd_db_password }}';
+          GRANT ALL ON {{ slurmdbd_db_name }}.* TO '{{ slurmdbd_db_user }}'@'localhost';
+          FLUSH PRIVILEGES;
+      changed_when: false
+      no_log: true
+
+    # --- slurmdbd ------------------------------------------------------------
+    - name: Create Slurm config and log folders
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: slurm
+        group: slurm
+        mode: "0755"
+      loop:
+        - "{{ slurm_sysconfdir }}"
+        - /var/log/slurm
+
+    - name: Write slurmdbd.conf (contains the password, so only slurm can read it)
+      ansible.builtin.template:
+        src: templates/slurmdbd.conf.j2
+        dest: "{{ slurm_sysconfdir }}/slurmdbd.conf"
+        owner: slurm
+        group: slurm
+        mode: "0600"
+      diff: false # never show the file (with the password) in --diff output
+      notify: Restart slurmdbd
+
+    - name: Install the slurmdbd systemd service
+      ansible.builtin.template:
+        src: templates/slurmdbd.service.j2
+        dest: /etc/systemd/system/slurmdbd.service
+        mode: "0644"
+      notify: Restart slurmdbd
+
+    - name: Start slurmdbd now and at boot
+      ansible.builtin.systemd_service:
+        name: slurmdbd
+        state: started
+        enabled: true
+        daemon_reload: true # systemd reads the new .service file
+
+    - name: Wait until slurmdbd listens on port {{ slurmdbd_port }}
+      ansible.builtin.wait_for:
+        port: "{{ slurmdbd_port }}"
+        timeout: 60
+
+  handlers:
+    - name: Restart mariadb
+      ansible.builtin.systemd_service:
+        name: mariadb
+        state: restarted
+
+    - name: Restart slurmdbd
+      ansible.builtin.systemd_service:
+        name: slurmdbd
+        state: restarted
+        daemon_reload: true

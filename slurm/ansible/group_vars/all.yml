@@ -53,3 +53,13 @@ slurm_sysconfdir: /etc/slurm
 # Marker file inside the install: tells Ansible this exact version is installed.
 # A new slurm_version has no marker yet, so it gets built and installed.
 slurm_marker: "{{ slurm_prefix }}/.installed-{{ slurm_version }}"
+
+# ---------------------------------------------------------------------------
+# Step 3.5: accounting database (MariaDB + slurmdbd on the master)
+# ---------------------------------------------------------------------------
+slurmdbd_port: 6819
+slurmdbd_db_name: slurm_acct_db
+slurmdbd_db_user: slurm
+# The password is NOT here: it is generated on the master the first time
+# (/root/.slurmdbd_db_password) and read from there on every run.
+slurmdbd_db_password_file: /root/.slurmdbd_db_password

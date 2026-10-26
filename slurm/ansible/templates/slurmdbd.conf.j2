@@ -1,0 +1,15 @@
+# Managed by Ansible (slurm/ansible/templates/slurmdbd.conf.j2). Do not edit on the server.
+# slurmdbd: the accounting daemon. slurmctld sends job records here; it stores them in MariaDB.
+AuthType=auth/munge
+DbdHost={{ groups['master'][0] }}
+DbdPort={{ slurmdbd_port }}
+SlurmUser=slurm
+LogFile=/var/log/slurm/slurmdbd.log
+PidFile=/run/slurmdbd/slurmdbd.pid
+
+StorageType=accounting_storage/mysql
+StorageHost=localhost
+StoragePort=3306
+StorageUser={{ slurmdbd_db_user }}
+StoragePass={{ slurmdbd_db_password }}
+StorageLoc={{ slurmdbd_db_name }}

@@ -1,0 +1,17 @@
+# Managed by Ansible (slurm/ansible/templates/slurmdbd.service.j2).
+[Unit]
+Description=Slurm DBD accounting daemon
+After=network-online.target munge.service mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=slurm
+Group=slurm
+RuntimeDirectory=slurmdbd
+ExecStart={{ slurm_prefix }}/sbin/slurmdbd -D -s
+ExecReload=/bin/kill -HUP $MAINPID
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

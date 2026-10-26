@@ -374,3 +374,80 @@ exit
 | compile killed / out of memory | swap on the master: `free -m` |
 | download fails | NAT gateway; `curl -sI https://download.schedmd.com` on the master |
 | `async task did not complete within the requested time` | rerun; the build continues where `make` stopped |
+
+**Result (2026-10-26):** compile ~10 minutes; recap master `changed=7`, nodes `changed=1`,
+`failed=0`; version check `ok` on all 4.
+
+---
+
+## Step 3.5: Accounting database (MariaDB + slurmdbd)
+
+Slurm keeps job history (who ran what, how long, how much CPU) in a database. Three programs
+on the master:
+
+```
+slurmctld (step 3.6) --> slurmdbd :6819 --> MariaDB :3306
+                         accounting         database slurm_acct_db
+                         daemon             user slurm@localhost
+```
+
+On-prem, slurmdbd runs on a separate server (172.16.3.14); here it shares the master.
+
+**Files:**
+
+| File | What |
+|---|---|
+| `slurm/ansible/templates/slurmdbd.conf.j2` | slurmdbd settings; becomes `/etc/slurm/slurmdbd.conf` |
+| `slurm/ansible/templates/slurmdbd.service.j2` | systemd service; becomes `/etc/systemd/system/slurmdbd.service` |
+| `group_vars/all.yml` | `slurmdbd_port`, `slurmdbd_db_name`, `slurmdbd_db_user`, `slurmdbd_db_password_file` |
+
+A **template** (`.j2`, Jinja2) is a file with `{{ variables }}` that Ansible fills in for each
+server; `template:` writes the result and reports `changed` only if it differs.
+
+**Play `Accounting database`** (master, tag `slurmdbd`):
+
+| Task | What |
+|---|---|
+| MariaDB | install `mariadb-server`; `/etc/my.cnf.d/innodb.cnf` (SchedMD's settings); start + enable; `flush_handlers` so a restart for new settings happens **before** slurmdbd creates its tables |
+| Password | generated once with `openssl rand` into `/root/.slurmdbd_db_password` (mode 600), read with `slurp`, kept in a variable with `set_fact` |
+| Database + user | `mysql -u root` with SQL on stdin: `CREATE DATABASE IF NOT EXISTS`, `CREATE USER IF NOT EXISTS`, `ALTER USER ... IDENTIFIED BY` (password always in sync), `GRANT` |
+| slurmdbd | `/etc/slurm` and `/var/log/slurm` (owner slurm); `slurmdbd.conf` (mode 600, owner slurm); service file; start + enable; wait until port 6819 is open |
+
+**No password in git.** The old `aws-infra` had `slurmdbd_db_password: "ChangeMe123"` in
+`vars.yml`. Now it is made on the master the first time, like the munge key, and every run reads
+it from there. Nobody types or stores it. Protection:
+
+- `/root/.slurmdbd_db_password` and `/etc/slurm/slurmdbd.conf` are readable only by root / slurm.
+- `no_log: true` on the tasks that handle it, and `diff: false` on the template, so it never
+  appears in Ansible output, not even with `--diff`.
+- To read it (as root on the master): `sudo cat /root/.slurmdbd_db_password`.
+
+**New ideas:** `template`, `set_fact` (make a variable during the run), `meta: flush_handlers`
+(run queued handlers now instead of at the end), `wait_for` (wait for a port), `diff: false`.
+
+**Run on the workstation:**
+
+```bash
+cd ~/workstation- && git pull && cd slurm
+make ansible-slurm      # ~2 minutes
+make ansible-slurm      # again: changed=0
+```
+
+**Check by hand** (on slurm-master):
+
+```bash
+make ssh
+systemctl is-active mariadb slurmdbd        # active active
+sudo ss -ltnp | grep -E '3306|6819'         # mariadbd on 3306, slurmdbd on 6819
+sudo tail -5 /var/log/slurm/slurmdbd.log    # no errors; tables created
+sudo ls -l /etc/slurm/slurmdbd.conf         # -rw------- slurm slurm
+sudo mysql -e 'SHOW DATABASES;'             # slurm_acct_db
+exit
+```
+
+| Error | Check |
+|---|---|
+| `wait_for` times out on 6819 | `sudo tail -30 /var/log/slurm/slurmdbd.log` |
+| log: `Access denied for user 'slurm'@'localhost'` | password file and `StoragePass` differ: rerun the playbook (ALTER USER syncs it) |
+| log: `slurmdbd.conf file ... should be 600` | file mode; the template sets 0600 |
+| log: `Can't connect to local MySQL server` | `systemctl status mariadb` |
