@@ -23,6 +23,7 @@ laptop  --SSH-->  workstation (workstation-vpc 172.22.0.0/16)
 | [01-vpc.md](01-vpc.md) | Stage 1: the Slurm VPC (Terraform) |
 | [02-vms.md](02-vms.md) | Stage 2: SSH key, security group, the 4 VMs (Terraform) |
 | [03-slurm.md](03-slurm.md) | Stage 3: Slurm on the 4 VMs (Ansible) |
+| [04-login-node.md](04-login-node.md) | Stage 4: workstation as Slurm login node, users submit jobs from there (manual) |
 
 ## How we work
 
@@ -61,4 +62,7 @@ and is not in git. If it is lost, Terraform no longer knows what it created.
 | 3 Slurm | 3.5 | MariaDB + slurmdbd | Done | 2026-10-26 |
 | 3 Slurm | 3.6 | slurm.conf + services → `sinfo` | Done | 2026-10-26 |
 | 3 Slurm | 3.7 | Accounting: account `default`, users root + ec2-user | Done | 2026-10-26 |
-| 3 Slurm | 3.8 | Extras: SSH between servers, X11 (EPEL, xclock) | Code ready | 2026-10-26 |
+| 3 Slurm | 3.8 | Extras: SSH between servers, X11 (EPEL, xclock) | Ran in full rebuild 2026-10-26 (xclock installed on nodes; PLAY RECAP not recorded) | 2026-10-26 |
+| 4 Login node | 1-4 | Network, Slurm client on workstation, users same uid, accounting | Done manually | 2026-10-26 |
+| 4 Login node | 5-6 | Direct user login (SSH key), tests incl. X11 | Partly: srun works as slurmtest1; X11 + direct login in progress | 2026-10-26 |
+| 4 Login node | | Automate (Terraform + Ansible) | To do | |
