@@ -193,3 +193,90 @@
         stdin: "{{ hostvars[groups['master'][0]].munge_cred.stdout }}"
       changed_when: false # a test, never a change
       when: not ansible_check_mode
+
+# ---------------------------------------------------------------------------
+# Step 3.4a: build Slurm once on the master (same commands as the on-prem notes)
+# The nodes have only 1 GB RAM, so they do not compile; they get a copy (3.4b).
+# ---------------------------------------------------------------------------
+- name: Build Slurm on the master
+  hosts: master
+  become: true
+  tags: build
+  vars:
+    src_dir: "/root/slurm-{{ slurm_version }}"
+  tasks:
+    - name: Install compiler and build tools ("Development Tools" group)
+      ansible.builtin.dnf:
+        name: "@Development Tools"
+        state: present
+
+    - name: Download the Slurm source from SchedMD
+      ansible.builtin.get_url:
+        url: "https://download.schedmd.com/slurm/slurm-{{ slurm_version }}.tar.bz2"
+        dest: "{{ src_dir }}.tar.bz2"
+        mode: "0644"
+
+    - name: Unpack the source
+      ansible.builtin.unarchive:
+        src: "{{ src_dir }}.tar.bz2"
+        dest: /root
+        remote_src: true # the file is on the server, not on the workstation
+        creates: "{{ src_dir }}/configure"
+
+    - name: Configure
+      ansible.builtin.command: >
+        ./configure --prefix={{ slurm_prefix }} --sysconfdir={{ slurm_sysconfdir }}
+        --with-munge --enable-debug
+      args:
+        chdir: "{{ src_dir }}"
+        creates: "{{ src_dir }}/config.status"
+
+    # Runs in the background on the server (async) and Ansible checks every 30 s,
+    # so a 10-15 minute compile does not depend on one long SSH session.
+    - name: Compile and install (10-15 minutes)
+      ansible.builtin.shell: >
+        make -j$(nproc) && make install && touch {{ slurm_marker }}
+      args:
+        chdir: "{{ src_dir }}"
+        creates: "{{ slurm_marker }}"
+      async: 2400 # give up after 40 minutes
+      poll: 30
+
+    - name: Pack the installed Slurm for the nodes
+      ansible.builtin.command: tar czf /root/slurm-install-{{ slurm_version }}.tgz -C /usr/local slurm
+      args:
+        creates: /root/slurm-install-{{ slurm_version }}.tgz
+
+    # Through the workstation, because the servers cannot SSH to each other yet.
+    # ansible/files/ is git-ignored.
+    - name: Copy the package to the workstation (ansible/files/)
+      ansible.builtin.fetch:
+        src: /root/slurm-install-{{ slurm_version }}.tgz
+        dest: files/
+        flat: true
+
+# ---------------------------------------------------------------------------
+# Step 3.4b: install the same build on the nodes
+# ---------------------------------------------------------------------------
+- name: Install Slurm on the nodes
+  hosts: nodes
+  become: true
+  tags: build
+  tasks:
+    - name: Unpack Slurm into /usr/local (from the workstation)
+      ansible.builtin.unarchive:
+        src: files/slurm-install-{{ slurm_version }}.tgz
+        dest: /usr/local
+        creates: "{{ slurm_marker }}"
+
+# Test: the right version is on every server.
+- name: Slurm build test
+  hosts: all
+  become: true
+  tags: build
+  tasks:
+    - name: Check the Slurm version
+      ansible.builtin.command: "{{ slurm_prefix }}/sbin/slurmd -V"
+      register: slurmd_version
+      changed_when: false
+      failed_when: slurm_version not in slurmd_version.stdout

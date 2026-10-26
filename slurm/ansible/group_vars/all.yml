@@ -43,3 +43,13 @@ slurm_packages:
   - dbus-devel
   - libbpf-devel
   - bzip2
+
+# ---------------------------------------------------------------------------
+# Step 3.4: build Slurm
+# ---------------------------------------------------------------------------
+slurm_version: "25.11.3" # same as on-prem
+slurm_prefix: /usr/local/slurm
+slurm_sysconfdir: /etc/slurm
+# Marker file inside the install: tells Ansible this exact version is installed.
+# A new slurm_version has no marker yet, so it gets built and installed.
+slurm_marker: "{{ slurm_prefix }}/.installed-{{ slurm_version }}"

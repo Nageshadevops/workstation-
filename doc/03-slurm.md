@@ -254,6 +254,14 @@ make ansible-slurm      # real run; the package install takes a few minutes per 
 make ansible-slurm      # again: changed=0
 ```
 
+**Lesson learned (2026-10-26):** even the packages-only dry run fails the first time:
+`No package munge-devel available` (also lua-devel, rrdtool-devel, mariadb-devel, json-c-devel,
+libbpf-devel). Those six are exactly the packages in CodeReady Builder. In check mode the repo
+task only *reports* that it would enable CRB, so the simulated `dnf` still cannot see them.
+Check without changing anything:
+`sudo dnf -q --enablerepo=codeready-builder-for-rhel-9-rhui-rpms list available munge-devel ...`
+(`--enablerepo` turns the repo on for that one command only). Then run for real.
+
 A dry run of the **whole** playbook fails before the first real run: munge is not installed
 yet, so "Start munge" cannot find the service. `--check` cannot simulate a service that an
 earlier task *would* install. The tasks that need the real key or a running munge are skipped
@@ -280,3 +288,89 @@ exit
 | dnf killed / out of memory on a node | swap from step 3.2 missing: `free -m` |
 | `unmunge: Error: Invalid credential` | keys differ: compare `md5sum` |
 | `unmunge: Error: Expired credential` | clocks differ: `timedatectl` (chronyd should be active) |
+
+**Result (2026-10-26):** packages installed and munge test `ok` on all 4. Second run:
+`changed=0 failed=0` (master ok=22 skipped=3, nodes ok=19 skipped=3).
+
+---
+
+## Step 3.4: Build Slurm
+
+Slurm 25.11.3 is built from source, exactly like the on-prem notes (steps 11-14 in
+`slurmconfigurationsetup.txt`), but only **once, on the master**. The result is packed and
+unpacked on the nodes: they have only 1 GB RAM, and one build guarantees identical binaries.
+
+```
+slurm-master: download -> configure -> make -> make install -> tar czf slurm-install-25.11.3.tgz
+                                                                         |  fetch
+                                                                         v
+                                              workstation: slurm/ansible/files/ (git-ignored)
+                                                                         |  unarchive
+                                                                         v
+                                              slurm-node-1..3: /usr/local/slurm
+```
+
+The package goes through the workstation because the servers cannot SSH to each other yet
+(step 3.8). It is about 140 MB (built with `--enable-debug`), not secret.
+
+**Variables** (`group_vars/all.yml`):
+
+| Variable | Value |
+|---|---|
+| `slurm_version` | 25.11.3 |
+| `slurm_prefix` | /usr/local/slurm |
+| `slurm_sysconfdir` | /etc/slurm |
+| `slurm_marker` | /usr/local/slurm/.installed-25.11.3 |
+
+**Plays** (tag `build`):
+
+| Play | Hosts | Tasks |
+|---|---|---|
+| Build Slurm on the master | master | Development Tools; download `slurm-25.11.3.tar.bz2`; unpack; `./configure --prefix=/usr/local/slurm --sysconfdir=/etc/slurm --with-munge --enable-debug`; `make -j$(nproc) && make install`; `tar czf`; `fetch` to the workstation |
+| Install Slurm on the nodes | nodes | `unarchive` the package into `/usr/local` |
+| Slurm build test | all | `slurmd -V` must print 25.11.3 |
+
+Ideas:
+
+- **Marker file for upgrades:** `make install` creates `/usr/local/slurm/.installed-25.11.3`
+  and every install task has `creates:` on it. Re-runs skip the build. If `slurm_version` is
+  changed later, there is no marker for the new version, so it is downloaded, built and
+  installed again: an upgrade is one variable change.
+- **`async` + `poll`:** the compile runs in the background on the master and Ansible checks every
+  30 seconds, so a 10-15 minute task does not depend on one long SSH session.
+- **`get_url`, `unarchive` (`remote_src: true`), `fetch`:** download on the server, unpack a
+  file that is already on the server, copy a file from a server to the workstation.
+- **`failed_when`:** the test fails only if the version text is missing from the output.
+
+**Run on the workstation:**
+
+```bash
+cd ~/workstation- && git pull && cd slurm
+make ansible-slurm      # ~15-20 minutes the first time (the compile is the slow part)
+make ansible-slurm      # again: changed=0, about 1 minute
+ls -lh ansible/files/   # slurm-install-25.11.3.tgz on the workstation
+```
+
+During "Compile and install" Ansible prints `ASYNC POLL on slurm-master: jid=... started=1
+finished=0` every 30 s; that is normal.
+
+No dry run for this step: `--check` cannot download or compile, so it would fail at the first
+task that needs the source.
+
+**Check by hand:**
+
+```bash
+make ssh HOST=slurm-node-2
+ls /usr/local/slurm               # bin  include  lib  sbin  share
+/usr/local/slurm/bin/sinfo -V     # slurm 25.11.3
+exit
+```
+
+`sinfo` itself does not work yet (no `slurm.conf`, no PATH): that is step 3.6.
+
+| Error | Check |
+|---|---|
+| `configure: error: ... munge` | munge-devel installed? (step 3.3) |
+| compile killed / out of memory | swap on the master: `free -m` |
+| download fails | NAT gateway; `curl -sI https://download.schedmd.com` on the master |
+| `async task did not complete within the requested time` | rerun; the build continues where `make` stopped |
