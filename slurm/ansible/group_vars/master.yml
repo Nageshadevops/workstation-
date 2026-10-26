@@ -1,0 +1,2 @@
+# Variables for the "master" group only (slurm-master).
+slurm_service: slurmctld # the controller

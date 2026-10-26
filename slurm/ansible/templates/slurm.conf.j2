@@ -1,0 +1,66 @@
+# Managed by Ansible (slurm/ansible/templates/slurm.conf.j2). Do not edit on the server:
+# the next run overwrites it. Must be identical on every server.
+# Based on the on-prem slurm.conf; no prolog script, slurmdbd runs on the master.
+
+ClusterName={{ cluster_name }}
+SlurmctldHost={{ groups['master'][0] }}({{ hostvars[groups['master'][0]].ansible_host }})
+AuthType=auth/munge
+
+# Job termination behavior
+KillWait=30
+OverTimeLimit=0
+
+SlurmctldPort=6817
+SlurmdPort=6818
+
+SlurmUser=slurm
+SlurmctldPidFile=/run/slurmctld/slurmctld.pid
+SlurmdPidFile=/var/run/slurmd.pid
+
+StateSaveLocation=/var/spool/slurmctld
+SlurmdSpoolDir=/var/spool/slurmd
+
+SlurmctldLogFile=/var/log/slurm/slurmctld.log
+SlurmdLogFile=/var/log/slurm/slurmd.log
+
+# Bring nodes back automatically after a reboot (on-prem: 0 = by hand with scontrol)
+ReturnToService=2
+
+# Process tracking
+ProctrackType=proctrack/cgroup
+TaskPlugin=task/affinity,task/cgroup
+
+# Scheduler
+SchedulerType=sched/backfill
+
+# Modern resource scheduling
+SelectType=select/cons_tres
+SelectTypeParameters=CR_Core
+
+# Accounting
+AccountingStorageType=accounting_storage/slurmdbd
+AccountingStorageHost={{ groups['master'][0] }}
+AccountingStoragePort={{ slurmdbd_port }}
+
+JobAcctGatherType=jobacct_gather/linux
+JobAcctGatherFrequency=30
+
+# X11 forwarding for GUI jobs (srun --x11)
+PrologFlags=X11
+X11Parameters=home_xauthority
+
+##################################################################
+# COMPUTE NODES
+# CPU layout and memory are read from each node's Ansible facts.
+# RealMemory = 90% of the RAM, so a node is not "drained" for having
+# a little less memory than configured.
+##################################################################
+{% for node in groups['nodes'] %}
+{% set f = hostvars[node].ansible_facts %}
+NodeName={{ node }} NodeAddr={{ hostvars[node].ansible_host }} SocketsPerBoard={{ f.processor_count }} CoresPerSocket={{ f.processor_cores }} ThreadsPerCore={{ f.processor_threads_per_core }} CPUs={{ f.processor_vcpus }} RealMemory={{ (f.memtotal_mb * 0.9) | int }} State=UNKNOWN
+{% endfor %}
+
+##################################################################
+# PARTITIONS
+##################################################################
+PartitionName=debug Nodes={{ groups['nodes'] | join(',') }} Default=YES MaxTime=INFINITE State=UP

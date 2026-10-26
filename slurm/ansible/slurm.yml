@@ -402,3 +402,96 @@
         name: slurmdbd
         state: restarted
         daemon_reload: true
+
+# ---------------------------------------------------------------------------
+# Step 3.6: slurm.conf + services on every server
+#   slurm-master  -> slurmctld (controller)
+#   slurm-node-*  -> slurmd    (runs the jobs)
+# slurm_service comes from group_vars/master.yml or group_vars/nodes.yml.
+# ---------------------------------------------------------------------------
+- name: Configure and start Slurm
+  hosts: all
+  become: true
+  tags: config
+  tasks:
+    - name: Create Slurm folders
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: slurm
+        group: slurm
+        mode: "0755"
+      loop:
+        - "{{ slurm_sysconfdir }}"
+        - /var/spool/slurmctld # controller state (used on the master)
+        - /var/spool/slurmd # node state (used on the nodes)
+        - /var/log/slurm
+
+    # One template, same result on every server (Slurm requires identical files).
+    - name: Write slurm.conf
+      ansible.builtin.template:
+        src: templates/slurm.conf.j2
+        dest: "{{ slurm_sysconfdir }}/slurm.conf"
+        owner: slurm
+        group: slurm
+        mode: "0644"
+      notify: Restart Slurm
+
+    - name: Write cgroup.conf (RHEL 9 uses cgroup v2; autodetect finds it)
+      ansible.builtin.copy:
+        dest: "{{ slurm_sysconfdir }}/cgroup.conf"
+        content: "CgroupPlugin=autodetect\n"
+        owner: slurm
+        group: slurm
+        mode: "0644"
+      notify: Restart Slurm
+
+    - name: Put the Slurm commands on every user's PATH
+      ansible.builtin.copy:
+        dest: /etc/profile.d/slurm.sh
+        content: "export PATH={{ slurm_prefix }}/bin:{{ slurm_prefix }}/sbin:$PATH\n"
+        mode: "0644"
+
+    - name: Install the {{ slurm_service }} systemd service
+      ansible.builtin.template:
+        src: "templates/{{ slurm_service }}.service.j2"
+        dest: "/etc/systemd/system/{{ slurm_service }}.service"
+        mode: "0644"
+      notify: Restart Slurm
+
+    - name: Start {{ slurm_service }} now and at boot
+      ansible.builtin.systemd_service:
+        name: "{{ slurm_service }}"
+        state: started
+        enabled: true
+        daemon_reload: true
+
+  handlers:
+    - name: Restart Slurm
+      ansible.builtin.systemd_service:
+        name: "{{ slurm_service }}"
+        state: restarted
+        daemon_reload: true
+
+# Test: all nodes must register with the controller and become "idle".
+- name: Slurm cluster test
+  hosts: master
+  become: true
+  tags: config
+  tasks:
+    - name: Wait until every node is idle (up to 2 minutes)
+      ansible.builtin.command: "{{ slurm_prefix }}/bin/sinfo --noheader --states=idle --format=%D"
+      register: idle_nodes
+      changed_when: false
+      until: idle_nodes.stdout | trim == groups['nodes'] | length | string
+      retries: 24
+      delay: 5
+
+    - name: Show sinfo
+      ansible.builtin.command: "{{ slurm_prefix }}/bin/sinfo"
+      register: sinfo
+      changed_when: false
+
+    - name: Print sinfo
+      ansible.builtin.debug:
+        var: sinfo.stdout_lines

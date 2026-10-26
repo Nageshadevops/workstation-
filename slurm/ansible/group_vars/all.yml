@@ -63,3 +63,9 @@ slurmdbd_db_user: slurm
 # The password is NOT here: it is generated on the master the first time
 # (/root/.slurmdbd_db_password) and read from there on every run.
 slurmdbd_db_password_file: /root/.slurmdbd_db_password
+
+# ---------------------------------------------------------------------------
+# Step 3.6: slurm.conf + services
+# ---------------------------------------------------------------------------
+cluster_name: slurmcluster # same as on-prem
+# slurm_service (slurmctld or slurmd) is set per group in master.yml / nodes.yml.

@@ -451,3 +451,105 @@ exit
 | log: `Access denied for user 'slurm'@'localhost'` | password file and `StoragePass` differ: rerun the playbook (ALTER USER syncs it) |
 | log: `slurmdbd.conf file ... should be 600` | file mode; the template sets 0600 |
 | log: `Can't connect to local MySQL server` | `systemctl status mariadb` |
+
+**Result (2026-10-26):** mariadb and slurmdbd active. slurmdbd.log: started, one SIGTERM
+(the handler restart for the new config on the first run, expected), connected to MariaDB 10.5.29.
+
+It also logs `error: Database settings not recommended values: innodb_buffer_pool_size`.
+This is a warning, not a failure: slurmdbd keeps running. MariaDB really uses our value
+(`SELECT @@innodb_buffer_pool_size/1024/1024` → 512); slurmdbd recommends more for production.
+Kept at 512 MB on purpose: the master has 4 GB RAM and also runs slurmctld; a test cluster
+needs far less. On a dedicated database server (as on-prem), use a larger value.
+
+---
+
+## Step 3.6: slurm.conf + services → sinfo
+
+Now Slurm gets its configuration and its daemons start:
+
+| Server | Daemon | Port | Job |
+|---|---|---|---|
+| slurm-master | `slurmctld` | 6817 | the controller: knows all nodes, queues and schedules jobs |
+| slurm-node-1..3 | `slurmd` | 6818 | runs the jobs; registers with slurmctld at start |
+
+**Files:**
+
+| File | Becomes | Where |
+|---|---|---|
+| `templates/slurm.conf.j2` | `/etc/slurm/slurm.conf` | all (identical) |
+| (inline) | `/etc/slurm/cgroup.conf` = `CgroupPlugin=autodetect` | all |
+| (inline) | `/etc/profile.d/slurm.sh` (PATH) | all |
+| `templates/slurmctld.service.j2` | `/etc/systemd/system/slurmctld.service` | master |
+| `templates/slurmd.service.j2` | `/etc/systemd/system/slurmd.service` (from the on-prem notes) | nodes |
+| `group_vars/master.yml` | `slurm_service: slurmctld` | |
+| `group_vars/nodes.yml` | `slurm_service: slurmd` | |
+
+**Group variables:** the same tasks run everywhere, but `slurm_service` has a different value
+per group, because Ansible loads `group_vars/master.yml` for servers in `[master]` and
+`group_vars/nodes.yml` for servers in `[nodes]`. So "Install the {{ slurm_service }} service"
+installs slurmctld on the master and slurmd on the nodes.
+
+**slurm.conf** (same settings as the on-prem file, see `slurm configurations.txt` in aws-infra):
+
+| Setting | Value | Note |
+|---|---|---|
+| `ClusterName` | slurmcluster | as on-prem |
+| `SlurmctldHost` | slurm-master(172.21.10.x) | on-prem: slurmcluster |
+| `AuthType` | auth/munge | as on-prem |
+| `ProctrackType` / `TaskPlugin` | cgroup / affinity,cgroup | as on-prem |
+| `SchedulerType` | sched/backfill | as on-prem |
+| `SelectType` | cons_tres, CR_Core | as on-prem |
+| `AccountingStorageHost` | slurm-master | on-prem: separate DB server 172.16.3.14 |
+| `PrologFlags` / `X11Parameters` | X11 / home_xauthority | on-prem also has `Prolog=/etc/slurm/prolog.sh` (not used here) |
+| `ReturnToService` | 2 | on-prem 0; nodes come back after a reboot without `scontrol` |
+| `SlurmctldPidFile` | /run/slurmctld/slurmctld.pid | slurmctld runs as user slurm and cannot write `/var/run` |
+| Nodes | from facts, `RealMemory` = 90% of RAM | e.g. t3.micro: 1 socket, 1 core, 2 threads, 2 CPUs |
+| Partition | `debug` = slurm-node-1,2,3, default, no time limit | on-prem: short/long/gui per OS |
+
+The node lines are built with a Jinja2 **`{% for %}` loop** over `groups['nodes']`, using each
+node's facts (`processor_count`, `processor_cores`, `processor_threads_per_core`,
+`processor_vcpus`, `memtotal_mb`). Adding a node in Terraform + rerunning Ansible adds its line.
+
+**Test play** (master): `sinfo --states=idle --format=%D` prints the number of idle nodes;
+`until:` + `retries: 24` + `delay: 5` repeats it until it equals 3 (max 2 minutes), then
+`sinfo` is printed with `debug`.
+
+**Run on the workstation:**
+
+```bash
+cd ~/workstation- && git pull && cd slurm
+make ansible-slurm
+make ansible-slurm      # again: changed=0
+```
+
+Expected at the end:
+
+```
+TASK [Print sinfo]
+ok: [slurm-master] => {
+    "sinfo.stdout_lines": [
+        "PARTITION AVAIL  TIMELIMIT  NODES  STATE NODELIST",
+        "debug*       up   infinite      3   idle slurm-node-[1-3]"
+    ]
+}
+```
+
+`debug*`: the `*` marks the default partition.
+
+**Try it** (on slurm-master; log in again so the new PATH is loaded):
+
+```bash
+make ssh
+sinfo                                   # debug*, 3 idle
+srun -N3 hostname                       # slurm-node-1, -2, -3 (one line each)
+scontrol show node slurm-node-1 | head -5
+exit
+```
+
+| Problem | Check |
+|---|---|
+| "Wait until every node is idle" retries and fails | `sinfo -N -l` on the master; `Reason=` in `scontrol show node <name>` |
+| node `down` / `unk` | on the node: `systemctl status slurmd`, `tail /var/log/slurm/slurmd.log` |
+| `Zero Bytes were transmitted` / auth errors | munge on both sides; `munge -n \| unmunge` |
+| node `drain` with "Low RealMemory" | node has less RAM than `RealMemory`; check `free -m` |
+| `sinfo: command not found` | log in again (`/etc/profile.d/slurm.sh` is read at login) |
