@@ -52,8 +52,8 @@ and is not in git. If it is lost, Terraform no longer knows what it created.
 | 2 VMs | 2.2 | Security group `slurm-dev-sg` + default SG emptied | Done | 2026-10-25 |
 | 2 VMs | 2.3 | slurm-master + SSH / NAT test (`make ssh`) | Done | 2026-10-25 |
 | 2 VMs | 2.4 | slurm-node-1..3 | Done | 2026-10-25 |
-| 3 Slurm | 3.1 | Ansible setup, generated inventory, `make ping` | Code ready | 2026-10-26 |
-| 3 Slurm | 3.2 | Base OS: hostnames, /etc/hosts, swap, SELinux, users | To do | |
+| 3 Slurm | 3.1 | Ansible setup, generated inventory, `make ping` | Done | 2026-10-26 |
+| 3 Slurm | 3.2 | Base OS: hostnames, /etc/hosts, swap, SELinux, users | Code ready | 2026-10-26 |
 | 3 Slurm | 3.3 | Packages + munge | To do | |
 | 3 Slurm | 3.4 | Build Slurm on master, copy to nodes | To do | |
 | 3 Slurm | 3.5 | MariaDB + slurmdbd | To do | |

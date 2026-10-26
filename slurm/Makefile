@@ -12,7 +12,7 @@ HOST ?= slurm-master
 # Ansible reads ansible/ansible.cfg (set explicitly, so it never depends on the folder).
 ANSIBLE := cd ansible && ANSIBLE_CONFIG=ansible.cfg
 
-.PHONY: help init fmt validate key plan apply destroy output ssh inventory ping
+.PHONY: help init fmt validate key plan apply destroy output ssh inventory ping ansible-slurm
 
 help:
 	@echo "Usage: make <target>"
@@ -27,6 +27,7 @@ help:
 	@echo "  ssh       log in to a Slurm server: make ssh [HOST=slurm-node-1]"
 	@echo "  inventory write ansible/inventory.ini from the Terraform outputs"
 	@echo "  ping      check that Ansible can reach and log in to every server"
+	@echo "  ansible-slurm  run the Slurm playbook; options: ARGS=\"--tags base\" or ARGS=\"--check --diff\""
 
 init:
 	$(TF) init
@@ -71,3 +72,6 @@ inventory:
 
 ping: inventory
 	$(ANSIBLE) ansible all -m ping
+
+ansible-slurm: inventory
+	$(ANSIBLE) ansible-playbook slurm.yml $(ARGS)

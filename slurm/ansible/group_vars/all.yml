@@ -1,0 +1,12 @@
+# Variables for every server ("all" group). Ansible loads this file automatically
+# because of its location: group_vars/<group name>.yml next to the playbook.
+
+# ---------------------------------------------------------------------------
+# Step 3.2: base OS
+# ---------------------------------------------------------------------------
+# Same IDs as on-prem, so files on shared storage keep the right owner.
+munge_uid: 791
+slurm_uid: 792
+
+# The nodes have only 1 GB RAM; dnf and Slurm run out of memory without swap.
+swap_size_mb: 2048

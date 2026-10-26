@@ -1,0 +1,95 @@
+# Slurm cluster: slurm-master (controller) + slurm-node-* (compute nodes).
+# Run from ~/workstation-/slurm:   make ansible-slurm
+# Only one part:                   make ansible-slurm ARGS="--tags base"
+# Dry run (changes nothing):       make ansible-slurm ARGS="--check --diff"
+
+# ---------------------------------------------------------------------------
+# Step 3.2: base OS on every server
+# ---------------------------------------------------------------------------
+- name: Base OS
+  hosts: all
+  become: true # run tasks as root (sudo); ec2-user has passwordless sudo
+  tags: base
+  tasks:
+    # --- hostname and name resolution ---------------------------------------
+    - name: Set hostname to the inventory name (slurm-master, slurm-node-1, ...)
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}"
+
+    - name: Keep the hostname after reboot (cloud-init would reset it)
+      ansible.builtin.copy:
+        dest: /etc/cloud/cloud.cfg.d/99-preserve-hostname.cfg
+        content: "preserve_hostname: true\n"
+        mode: "0644"
+
+    - name: Add every cluster server to /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: "\\s{{ item }}$" # replace the line if the IP changed
+        line: "{{ hostvars[item].ansible_host }} {{ item }}"
+      loop: "{{ groups['all'] }}"
+
+    # --- swap ------------------------------------------------------------------
+    - name: Create swap file
+      ansible.builtin.command: dd if=/dev/zero of=/swapfile bs=1M count={{ swap_size_mb }}
+      args:
+        creates: /swapfile # skip if the file already exists
+      register: swapfile
+
+    - name: Format swap file
+      ansible.builtin.command: mkswap /swapfile
+      when: swapfile.changed
+
+    - name: Swap file permissions (root only)
+      ansible.builtin.file:
+        path: /swapfile
+        mode: "0600"
+
+    - name: Turn swap on
+      ansible.builtin.command: swapon /swapfile
+      when: ansible_facts['swaptotal_mb'] == 0 # no swap active yet
+
+    - name: Turn swap on at boot
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: "/swapfile none swap defaults 0 0"
+
+    # --- security settings ---------------------------------------------------
+    # Slurm and munge run from /usr/local and use their own ports; SELinux in
+    # enforcing mode blocks them. Same as on-prem.
+    - name: SELinux permissive (now and after reboot)
+      ansible.posix.selinux:
+        state: permissive
+        policy: targeted
+
+    # The security group slurm-dev-sg is the firewall. firewalld on the server
+    # would block the Slurm ports. RHEL AMIs on AWS usually do not have it.
+    - name: List services
+      ansible.builtin.service_facts:
+
+    - name: Stop and disable firewalld (if installed)
+      ansible.builtin.systemd_service:
+        name: firewalld
+        state: stopped
+        enabled: false
+      when: "'firewalld.service' in ansible_facts.services"
+
+    # --- service users ---------------------------------------------------------
+    - name: Create munge and slurm groups
+      ansible.builtin.group:
+        name: "{{ item.name }}"
+        gid: "{{ item.id }}"
+      loop:
+        - { name: munge, id: "{{ munge_uid }}" }
+        - { name: slurm, id: "{{ slurm_uid }}" }
+
+    - name: Create munge and slurm users (system users, no login)
+      ansible.builtin.user:
+        name: "{{ item.name }}"
+        uid: "{{ item.id }}"
+        group: "{{ item.name }}"
+        shell: /sbin/nologin
+        create_home: false
+      loop:
+        - { name: munge, id: "{{ munge_uid }}" }
+        - { name: slurm, id: "{{ slurm_uid }}" }

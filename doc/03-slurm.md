@@ -108,3 +108,88 @@ slurm-master | SUCCESS => {
 | `bash\r: No such file or directory` | script got Windows line endings; `.gitattributes` prevents this |
 
 **Nothing is changed on the servers in this step.**
+
+**Result (2026-10-26):** all 4 servers `SUCCESS` / `pong`, Python `/usr/bin/python3.9`.
+`make plan` afterwards: `No changes. Your infrastructure matches the configuration.`
+
+---
+
+## Step 3.2: Base OS
+
+The first playbook that **changes** the servers: the OS settings every Slurm server needs.
+
+**New files:**
+
+| File | What |
+|---|---|
+| `slurm/ansible/slurm.yml` | the **playbook**: a list of *plays*; each play = which hosts + a list of *tasks* |
+| `slurm/ansible/group_vars/all.yml` | variables for all servers, loaded automatically (because of the folder name) |
+
+New make target: `make ansible-slurm` (= `make inventory`, then `ansible-playbook slurm.yml`).
+
+**Play `Base OS`** (`hosts: all`, `become: true` = run as root via sudo, tag `base`):
+
+| Task | Module | What it does | Why |
+|---|---|---|---|
+| Set hostname | `hostname` | `slurm-master`, `slurm-node-1`, ... (the inventory name) | Slurm identifies nodes by hostname |
+| Keep the hostname | `copy` | `/etc/cloud/cloud.cfg.d/99-preserve-hostname.cfg` | otherwise cloud-init resets it to `ip-172-21-...` at boot |
+| /etc/hosts | `lineinfile` + `loop` | one line per server: `172.21.10.x slurm-node-1` | servers find each other by name, no DNS needed |
+| Swap file | `command` (`creates:`), `file`, `lineinfile` | 2 GB `/swapfile`, on now and at boot | nodes have 1 GB RAM; dnf ran out of memory without it |
+| SELinux permissive | `ansible.posix.selinux` | permissive now and in `/etc/selinux/config` | Slurm/munge from `/usr/local` are blocked in enforcing mode (same as on-prem) |
+| firewalld off | `service_facts` + `systemd_service` | stopped + disabled, **only if installed** | the security group is the firewall |
+| munge / slurm users | `group`, `user` + `loop` | munge 791, slurm 792, no login shell, no home | same IDs as on-prem |
+
+**Ideas in this playbook:**
+
+- **Modules** do one job each (`hostname`, `copy`, `lineinfile`, `user`, ...) and check first:
+  if the server is already right, the task reports `ok` and changes nothing.
+- **Idempotent:** running the playbook again gives the same result. Tasks that run commands
+  use `creates:` (skip if a file exists) or `when:` (skip if a condition is false) to stay idempotent.
+- **`loop`** repeats a task for each item; `{{ item }}` is the current one.
+- **Facts:** at the start, Ansible collects information about each server ("Gathering Facts"),
+  e.g. `ansible_facts['swaptotal_mb']`. `when:` uses it to decide.
+- **`register`** saves a task's result (`swapfile.changed`) for later tasks.
+- **`hostvars[item].ansible_host`** reads another server's inventory value (its IP).
+- **Tags** (`base`) let you run only part of the playbook: `ARGS="--tags base"`.
+
+**Run on the workstation:**
+
+```bash
+cd ~/workstation- && git pull && cd slurm
+make ansible-slurm ARGS="--check --diff"   # dry run: shows what would change, changes nothing
+make ansible-slurm                         # real run
+make ansible-slurm                         # again: everything "ok", changed=0
+```
+
+Read the **PLAY RECAP** at the end:
+
+```
+slurm-master : ok=12  changed=8  unreachable=0  failed=0  skipped=1 ...
+```
+
+| Word | Meaning |
+|---|---|
+| `ok` | task ran, server already correct |
+| `changed` | task changed something |
+| `skipped` | `when:` was false (e.g. firewalld not installed) |
+| `failed` / `unreachable` | must be 0 |
+
+In `--check` mode, `command` tasks are skipped (Ansible cannot know what a command would do),
+so the dry run shows fewer changes than the real run.
+
+**Check on a server:**
+
+```bash
+make ssh HOST=slurm-node-1
+hostname                       # slurm-node-1 (prompt changes at next login)
+cat /etc/hosts                 # 4 cluster lines
+free -m                        # Swap: 2047
+getenforce                     # Permissive
+id munge; id slurm             # uid=791(munge) ..., uid=792(slurm) ...
+ping -c1 slurm-master          # name works between servers
+exit
+```
+
+If `ansible.posix.selinux` is not found: the workstation has only `ansible-core`. The full
+`ansible` pip package (installed in the workstation setup) includes `ansible.posix`.
+Check with `ansible-galaxy collection list | grep posix`.
