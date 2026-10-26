@@ -9,7 +9,10 @@ SSH_KEY := $(HOME)/.ssh/slurm-dev-key
 # Server for `make ssh`; override with: make ssh HOST=slurm-node-1
 HOST ?= slurm-master
 
-.PHONY: help init fmt validate key plan apply destroy output ssh
+# Ansible reads ansible/ansible.cfg (set explicitly, so it never depends on the folder).
+ANSIBLE := cd ansible && ANSIBLE_CONFIG=ansible.cfg
+
+.PHONY: help init fmt validate key plan apply destroy output ssh inventory ping
 
 help:
 	@echo "Usage: make <target>"
@@ -22,6 +25,8 @@ help:
 	@echo "  destroy   delete everything Terraform created"
 	@echo "  output    show the outputs (IDs, IPs, ...)"
 	@echo "  ssh       log in to a Slurm server: make ssh [HOST=slurm-node-1]"
+	@echo "  inventory write ansible/inventory.ini from the Terraform outputs"
+	@echo "  ping      check that Ansible can reach and log in to every server"
 
 init:
 	$(TF) init
@@ -57,3 +62,12 @@ output:
 ssh:
 	ssh -i $(SSH_KEY) -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 	  ec2-user@$$($(TF) output -json instances | jq -r '."$(HOST)".private_ip')
+
+# ---------------------------------------------------------------------------
+# Ansible (stage 3)
+# ---------------------------------------------------------------------------
+inventory:
+	bash ansible/make-inventory.sh
+
+ping: inventory
+	$(ANSIBLE) ansible all -m ping

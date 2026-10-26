@@ -20,6 +20,7 @@ laptop  --SSH-->  workstation (workstation-vpc 172.22.0.0/16)
 | [Workstation-Setup.docx](Workstation-Setup.docx) | How the workstation VM was set up (console, by hand) |
 | [01-vpc.md](01-vpc.md) | Stage 1: the Slurm VPC (Terraform) |
 | [02-vms.md](02-vms.md) | Stage 2: SSH key, security group, the 4 VMs (Terraform) |
+| [03-slurm.md](03-slurm.md) | Stage 3: Slurm on the 4 VMs (Ansible) |
 
 ## How we work
 
@@ -50,5 +51,12 @@ and is not in git. If it is lost, Terraform no longer knows what it created.
 | 2 VMs | 2.1 | SSH key pair `slurm-dev-key` (created by `make plan`) | Done | 2026-10-25 |
 | 2 VMs | 2.2 | Security group `slurm-dev-sg` + default SG emptied | Done | 2026-10-25 |
 | 2 VMs | 2.3 | slurm-master + SSH / NAT test (`make ssh`) | Done | 2026-10-25 |
-| 2 VMs | 2.4 | slurm-node-1..3 | Code ready | 2026-10-25 |
-| 3 Slurm | | Ansible: munge, Slurm, slurmdbd | To do | |
+| 2 VMs | 2.4 | slurm-node-1..3 | Done | 2026-10-25 |
+| 3 Slurm | 3.1 | Ansible setup, generated inventory, `make ping` | Code ready | 2026-10-26 |
+| 3 Slurm | 3.2 | Base OS: hostnames, /etc/hosts, swap, SELinux, users | To do | |
+| 3 Slurm | 3.3 | Packages + munge | To do | |
+| 3 Slurm | 3.4 | Build Slurm on master, copy to nodes | To do | |
+| 3 Slurm | 3.5 | MariaDB + slurmdbd | To do | |
+| 3 Slurm | 3.6 | slurm.conf + services → `sinfo` | To do | |
+| 3 Slurm | 3.7 | Accounting + test jobs | To do | |
+| 3 Slurm | 3.8 | Extras: SSH between nodes, X11 | To do | |
