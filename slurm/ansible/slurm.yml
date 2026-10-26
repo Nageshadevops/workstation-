@@ -543,10 +543,121 @@
       when: item not in account_users.stdout_lines
 
     - name: Show the associations (cluster / account / user)
-      ansible.builtin.command: "{{ sacctmgr }} -n show association format=cluster,account,user"
+      ansible.builtin.command: "{{ sacctmgr }} -n show association format=cluster%15,account%10,user%10"
       register: assoc
       changed_when: false
 
     - name: Print the associations
       ansible.builtin.debug:
         var: assoc.stdout_lines
+
+# ---------------------------------------------------------------------------
+# Step 3.8a: passwordless SSH between all servers, for root and ec2-user.
+# One key pair per user, made on the master and copied to every server, then
+# authorized everywhere: every server can SSH to every other one.
+# ---------------------------------------------------------------------------
+- name: SSH between all servers
+  hosts: all
+  become: true
+  tags: ssh
+  tasks:
+    - name: Create one SSH key per user on the master (only if missing)
+      ansible.builtin.command: >
+        ssh-keygen -t ed25519 -N "" -C "{{ item.name }}@{{ cluster_name }}"
+        -f {{ item.home }}/.ssh/id_ed25519
+      args:
+        creates: "{{ item.home }}/.ssh/id_ed25519"
+      loop: "{{ cluster_ssh_users }}"
+      when: inventory_hostname in groups['master']
+
+    - name: Read the key pairs from the master into memory
+      ansible.builtin.slurp:
+        src: "{{ item.0.home }}/.ssh/{{ item.1 }}"
+      delegate_to: "{{ groups['master'][0] }}" # run on the master...
+      run_once: true # ...once, not once per server
+      register: cluster_keys
+      loop: "{{ cluster_ssh_users | product(['id_ed25519', 'id_ed25519.pub']) | list }}"
+      no_log: true # private keys
+
+    - name: Same key pair on every server
+      ansible.builtin.copy:
+        content: "{{ item.content | b64decode }}"
+        dest: "{{ item.item.0.home }}/.ssh/{{ item.item.1 }}"
+        owner: "{{ item.item.0.name }}"
+        group: "{{ item.item.0.name }}"
+        mode: "{{ '0644' if item.item.1.endswith('.pub') else '0600' }}"
+      loop: "{{ cluster_keys.results }}"
+      no_log: true
+
+    - name: Authorize the key for the same user everywhere
+      ansible.builtin.lineinfile:
+        path: "{{ item.item.0.home }}/.ssh/authorized_keys"
+        line: "{{ item.content | b64decode | trim }}"
+        create: true
+        owner: "{{ item.item.0.name }}"
+        group: "{{ item.item.0.name }}"
+        mode: "0600"
+      loop: "{{ cluster_keys.results | selectattr('item.1', 'equalto', 'id_ed25519.pub') | list }}"
+      no_log: true
+
+    # The servers are recreated often; accept a new server's host key the first
+    # time without asking, but still refuse a changed key for a known name.
+    - name: Do not ask "are you sure?" for cluster servers
+      ansible.builtin.copy:
+        dest: "{{ item.home }}/.ssh/config"
+        content: |
+          Host slurm-*
+              StrictHostKeyChecking accept-new
+        owner: "{{ item.name }}"
+        group: "{{ item.name }}"
+        mode: "0600"
+      loop: "{{ cluster_ssh_users }}"
+
+# ---------------------------------------------------------------------------
+# Step 3.8b: X11 for GUI jobs: ssh -X to the master, then srun --x11 <program>
+# slurm.conf already has PrologFlags=X11 and X11Parameters=home_xauthority.
+# ---------------------------------------------------------------------------
+- name: X11 for GUI jobs
+  hosts: all
+  become: true
+  tags: x11
+  tasks:
+    # EPEL = Extra Packages for Enterprise Linux (Fedora project). Needed for xclock.
+    - name: Import the EPEL signing key
+      ansible.builtin.rpm_key:
+        key: https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-9
+        state: present
+
+    - name: Enable the EPEL repo
+      ansible.builtin.dnf:
+        name: https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+        state: present
+
+    - name: Install X11 tools (xauth, xterm, xclock)
+      ansible.builtin.dnf:
+        name: "{{ x11_packages }}"
+        state: present
+
+    - name: Allow X11 forwarding over SSH
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/10-x11.conf
+        content: "X11Forwarding yes\n"
+        mode: "0600"
+      notify: Restart sshd
+
+  handlers:
+    - name: Restart sshd
+      ansible.builtin.systemd_service:
+        name: sshd
+        state: restarted
+
+# Test: every server can SSH to every other server as ec2-user, without a password.
+- name: SSH test
+  hosts: all
+  become: false # Ansible logs in as ec2-user already
+  tags: ssh
+  tasks:
+    - name: SSH from this server to every server
+      ansible.builtin.command: ssh -o BatchMode=yes {{ item }} hostname
+      loop: "{{ groups['all'] }}"
+      changed_when: false

@@ -79,3 +79,17 @@ slurm_account: default
 slurm_users:
   - root
   - ec2-user
+
+# ---------------------------------------------------------------------------
+# Step 3.8: extras
+# ---------------------------------------------------------------------------
+# Users that can SSH from any server to any other without a password.
+cluster_ssh_users:
+  - { name: root, home: /root }
+  - { name: ec2-user, home: /home/ec2-user }
+
+# X11 for GUI jobs (srun --x11). xclock is not in RHEL 9; it comes from EPEL.
+x11_packages:
+  - xorg-x11-xauth
+  - xterm
+  - xclock

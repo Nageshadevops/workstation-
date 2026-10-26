@@ -640,3 +640,110 @@ exit
 ```
 
 `-X` shows only the job itself, not its steps. Jobs from before this step keep an empty Account.
+
+**Result (2026-10-26):** associations created (default / ec2-user, default / root, plus Slurm's
+built-in root account). Full run afterwards: `changed=0 failed=0`, the add-user tasks
+`skipping` (already there). `slurmclus+` in the output was only sacctmgr's default 10-character
+column width; widened to `cluster%15` in step 3.8.
+
+---
+
+## Step 3.8: Extras (SSH between servers, X11)
+
+Before this step (tested 2026-10-26):
+
+| Try | Result | Why |
+|---|---|---|
+| `ssh slurm-node-2` on the **workstation** | `Could not resolve hostname` | only the Slurm servers have the names in `/etc/hosts`; from the workstation use `make ssh HOST=slurm-node-2` |
+| `ssh slurm-node-2` on the **master** | `Permission denied (publickey)` | no SSH key between the servers |
+| `srun xclock` | `execve(): xclock: No such file or directory` | xclock not installed on the nodes |
+
+### 3.8a: SSH between all servers
+
+**Play `SSH between all servers`** (all, tag `ssh`), for each user in `cluster_ssh_users`
+(root, ec2-user):
+
+| Task | What |
+|---|---|
+| Create key | `ssh-keygen -t ed25519` on the master, only if `~/.ssh/id_ed25519` is missing |
+| Read keys | `slurp` both files from the master: `delegate_to` the master + `run_once` = read once, on the master, even though the play runs on all servers |
+| Same key pair everywhere | `copy content:` private key (0600) and public key (0644) to every server |
+| Authorize | add the public key to `~/.ssh/authorized_keys` of the same user everywhere |
+| ssh config | `Host slurm-*` → `StrictHostKeyChecking accept-new`: a new server's host key is accepted the first time without a question; a **changed** key for a known name is still refused |
+
+Result: as root or ec2-user, any server can `ssh` to any other (master ↔ nodes, node ↔ node)
+without a password. Same key pair on every server = one `authorized_keys` line per user.
+
+**Play `SSH test`** (all, as ec2-user): `ssh -o BatchMode=yes <server> hostname` from every
+server to every server (16 combinations). `BatchMode=yes` = fail instead of asking for a password.
+
+`product(...)`, `selectattr(...)`: Jinja2 filters. `product` makes every (user, file) pair;
+`selectattr` keeps only the `.pub` results.
+
+### 3.8b: X11 for GUI jobs
+
+**Play `X11 for GUI jobs`** (all, tag `x11`):
+
+| Task | What |
+|---|---|
+| EPEL | import the EPEL GPG key (`rpm_key`), install `epel-release` |
+| X11 tools | `xorg-x11-xauth`, `xterm` (RHEL) and `xclock` (EPEL) |
+| sshd | `/etc/ssh/sshd_config.d/10-x11.conf` = `X11Forwarding yes`, restart sshd (handler) |
+
+slurm.conf already has `PrologFlags=X11` and `X11Parameters=home_xauthority` (step 3.6).
+A program used in a job must be installed on **every node** that may run it.
+
+**How a window gets to your screen:**
+
+```
+laptop (WSL, Windows 11 has a built-in X server, WSLg)
+  └ ssh -X siddug@40.192.85.194              workstation must allow X11 forwarding + have xauth
+      └ make ssh SSH_ARGS=-X                  slurm-master
+          └ srun --x11 xclock                 Slurm forwards X11 from the node back to the master
+```
+
+**One-time on the workstation** (not managed by this repo):
+
+```bash
+sudo dnf install -y xorg-x11-xauth
+sudo sshd -T | grep -i x11forwarding        # must say: x11forwarding yes
+```
+
+If it says `no`: `echo "X11Forwarding yes" | sudo tee /etc/ssh/sshd_config.d/10-x11.conf` and
+`sudo systemctl restart sshd`.
+
+**New in the Makefile:** `SSH_ARGS`, for extra ssh options: `make ssh SSH_ARGS=-X`.
+
+**Run on the workstation:**
+
+```bash
+cd ~/workstation- && git pull && cd slurm
+make ansible-slurm      # EPEL + X11 packages take a few minutes
+make ansible-slurm      # again: changed=0
+```
+
+**Try SSH between servers:**
+
+```bash
+make ssh
+ssh slurm-node-2 hostname                        # slurm-node-2, no password, no question
+for n in slurm-master slurm-node-1 slurm-node-2 slurm-node-3; do ssh $n hostname; done
+munge -n | ssh slurm-node-1 unmunge | grep STATUS   # munge across servers: Success (0)
+exit
+```
+
+**Try a GUI job** (from the laptop, WSL):
+
+```bash
+ssh -X siddug@40.192.85.194
+cd ~/workstation-/slurm && make ssh SSH_ARGS=-X
+echo $DISPLAY          # localhost:10.0 (or similar); empty = X11 not forwarded
+srun --x11 xclock      # a clock window opens on the laptop; close it to end the job
+```
+
+| Error | Cause |
+|---|---|
+| `srun: error: No DISPLAY variable set, cannot setup x11 forwarding` | not logged in with `-X` on **both** hops; check `echo $DISPLAY` on the workstation and the master |
+| `X11 forwarding request failed` on the workstation | workstation: `xorg-x11-xauth` missing or `X11Forwarding no` |
+| `Can't open display` | DISPLAY set but X server not reachable: on the laptop `echo $DISPLAY` must show `:0` (WSLg) |
+| `execve(): xclock: No such file or directory` | X11 play not run on that node |

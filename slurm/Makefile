@@ -8,6 +8,8 @@ SSH_KEY := $(HOME)/.ssh/slurm-dev-key
 
 # Server for `make ssh`; override with: make ssh HOST=slurm-node-1
 HOST ?= slurm-master
+# Extra ssh options, e.g. X11 forwarding for GUI jobs: make ssh SSH_ARGS=-X
+SSH_ARGS ?=
 
 # Ansible reads ansible/ansible.cfg (set explicitly, so it never depends on the folder).
 ANSIBLE := cd ansible && ANSIBLE_CONFIG=ansible.cfg
@@ -24,7 +26,7 @@ help:
 	@echo "  apply     apply the saved plan (run make plan first)"
 	@echo "  destroy   delete everything Terraform created"
 	@echo "  output    show the outputs (IDs, IPs, ...)"
-	@echo "  ssh       log in to a Slurm server: make ssh [HOST=slurm-node-1]"
+	@echo "  ssh       log in to a Slurm server: make ssh [HOST=slurm-node-1] [SSH_ARGS=-X]"
 	@echo "  inventory write ansible/inventory.ini from the Terraform outputs"
 	@echo "  ping      check that Ansible can reach and log in to every server"
 	@echo "  ansible-slurm  run the Slurm playbook; options: ARGS=\"--tags base\" or ARGS=\"--check --diff\""
@@ -61,7 +63,7 @@ output:
 # Servers get new host keys on every re-create, so known_hosts is not used (lab only,
 # private network reachable only from the workstation).
 ssh:
-	ssh -i $(SSH_KEY) -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	ssh $(SSH_ARGS) -i $(SSH_KEY) -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 	  ec2-user@$$($(TF) output -json instances | jq -r '."$(HOST)".private_ip')
 
 # ---------------------------------------------------------------------------
