@@ -14,7 +14,12 @@ data "aws_vpc" "workstation" {
 
 # The route table used by the workstation's subnet.
 data "aws_route_table" "workstation" {
-  subnet_id = var.workstation_subnet_id
+  vpc_id = data.aws_vpc.workstation.id
+
+  filter {
+    name   = "association.main"
+    values = ["true"]
+  }
 }
 
 # The peering connection. Both VPCs are in the same account and region, so

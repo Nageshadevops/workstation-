@@ -14,9 +14,9 @@ private_subnet_cidr = "172.21.10.0/24" # 172.21.10.0 - 172.21.10.255
 # ---------------------------------------------------------------------------
 # Workstation (created by hand, see doc/Workstation-Setup.docx)
 # ---------------------------------------------------------------------------
-workstation_vpc_id     = "vpc-0e9edd6e4c012d786"    # workstation-vpc, 172.22.0.0/16
-workstation_subnet_id  = "subnet-0c71b9f5fd4fb972f" # workstation-subnet-public1-ap-south-2a
-workstation_private_ip = "172.22.7.210"
+workstation_vpc_id     = "vpc-048b5c867ebd27427"
+workstation_subnet_id  = "subnet-013a5b6e081ff7e64"
+workstation_private_ip = "172.22.7.185"
 
 # ---------------------------------------------------------------------------
 # Compute
