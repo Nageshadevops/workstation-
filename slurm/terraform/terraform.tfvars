@@ -25,7 +25,7 @@ ssh_public_key_path = "~/.ssh/slurm-dev-key.pub" # created by `make plan` if mis
 
 # One entry = one server. To add a node, add a line; to remove one, delete its line.
 instances = {
-  "slurm-master" = { instance_type = "t3.medium" } # 2 vCPU / 4 GB: controller + database
+  "slurm-master" = { instance_type = "t3.micro" } # 2 vCPU / 4 GB: controller + database
   "slurm-node-1" = { instance_type = "t3.micro" }  # 2 vCPU / 1 GB: compute node
   "slurm-node-2" = { instance_type = "t3.micro" }
   "slurm-node-3" = { instance_type = "t3.micro" }
