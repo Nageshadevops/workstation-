@@ -769,6 +769,7 @@ Attach iam role with below policy to create the infra through terrafrom via work
 				"ec2:AuthorizeSecurityGroupEgress",
 				"ec2:RevokeSecurityGroupIngress",
 				"ec2:RevokeSecurityGroupEgress",
+				"ec2:ModifySecurityGroupRules",
 				"ec2:CreateVpcPeeringConnection",
 				"ec2:AcceptVpcPeeringConnection",
 				"ec2:DeleteVpcPeeringConnection",
