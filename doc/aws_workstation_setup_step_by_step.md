@@ -731,3 +731,77 @@ Planned activities:
 ---
 
 **Document Status:** AWS infrastructure and initial workstation software installation completed. Linux administrator account and remaining workstation configuration are pending.
+
+------------------------------------------
+
+Attach iam role with below policy to create the infra through terrafrom via workstation vm
+
+---------
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Sid": "SlurmTerraformEC2Management",
+			"Effect": "Allow",
+			"Action": [
+				"ec2:CreateVpc",
+				"ec2:DeleteVpc",
+				"ec2:ModifyVpcAttribute",
+				"ec2:CreateSubnet",
+				"ec2:DeleteSubnet",
+				"ec2:CreateInternetGateway",
+				"ec2:AttachInternetGateway",
+				"ec2:DetachInternetGateway",
+				"ec2:DeleteInternetGateway",
+				"ec2:CreateRouteTable",
+				"ec2:DeleteRouteTable",
+				"ec2:CreateRoute",
+				"ec2:DeleteRoute",
+				"ec2:AssociateRouteTable",
+				"ec2:DisassociateRouteTable",
+				"ec2:AllocateAddress",
+				"ec2:ReleaseAddress",
+				"ec2:CreateNatGateway",
+				"ec2:DeleteNatGateway",
+				"ec2:CreateSecurityGroup",
+				"ec2:DeleteSecurityGroup",
+				"ec2:AuthorizeSecurityGroupIngress",
+				"ec2:AuthorizeSecurityGroupEgress",
+				"ec2:RevokeSecurityGroupIngress",
+				"ec2:RevokeSecurityGroupEgress",
+				"ec2:CreateVpcPeeringConnection",
+				"ec2:AcceptVpcPeeringConnection",
+				"ec2:DeleteVpcPeeringConnection",
+				"ec2:ImportKeyPair",
+				"ec2:DeleteKeyPair",
+				"ec2:RunInstances",
+				"ec2:TerminateInstances",
+				"ec2:CreateNetworkInterface",
+				"ec2:DeleteNetworkInterface",
+				"ec2:CreateVolume",
+				"ec2:DeleteVolume",
+				"ec2:CreateTags",
+				"ec2:DeleteTags"
+			],
+			"Resource": "*",
+			"Condition": {
+				"StringEquals": {
+					"aws:RequestedRegion": "ap-south-2"
+				}
+			}
+		},
+		{
+			"Sid": "SlurmTerraformEC2Read",
+			"Effect": "Allow",
+			"Action": [
+				"ec2:Describe*"
+			],
+			"Resource": "*",
+			"Condition": {
+				"StringEquals": {
+					"aws:RequestedRegion": "ap-south-2"
+				}
+			}
+		}
+	]
+}
